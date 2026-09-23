@@ -1,99 +1,101 @@
 #!/usr/bin/env python3
-"""Record aircraft positions heard by this receiver.
+"""Log everything this receiver hears, to SQLite on the USB drive.
 
-Every 2 seconds, reads the receiver's current picture (readsb writes it to
-/run/readsb/aircraft.json) and appends each fresh position inside the map's
-area to an hourly file under /var/lib/iad-map/points/. Files older than
-26 hours are deleted, so the disk holds about a day of history.
+Every 2 seconds (IADMAP_INTERVAL_S), reads readsb's current picture,
+/run/readsb/aircraft.json, and stores one row for every aircraft that has sent
+a message since the previous read -- all ranges and altitudes, with or without
+a position (Mode S-only aircraft have none). Nothing is filtered or deleted
+here; choosing what to show is the publisher's job, and how long to keep the
+log has not been decided.
 
-Each line is one JSON array:
-  [epoch_s, hex, lat, lon, alt_ft, gs_kt, track_deg, vrate_fpm, flight, type, mlat]
-alt_ft is 0 for aircraft on the ground; missing numbers are null.
+Rows are buffered and committed every 30 seconds, so the drive sees a
+handful of writes a minute rather than one per read. The database lives on
+/mnt/flightdata, never the SD card: the collector refuses to start if that
+drive isn't mounted.
+
+Table `positions`, one row per aircraft per read:
+  t          epoch seconds of the aircraft's last message
+  hex        ICAO address        flight, type, category, squawk
+  lat, lon   NULL if no position; pos_t = epoch seconds of that position
+             (an aircraft can send other messages without a new position)
+  alt_baro   feet (pressure altitude; can be negative on the ground)
+  on_ground  1 when readsb reports "ground"
+  alt_geom, gs, track, baro_rate, geom_rate, rssi
+  mlat       1 if the position came from MLAT
 """
-import json, math, os, time
+import json, os, sqlite3, time
 
 AIRCRAFT_JSON = os.environ.get("IADMAP_AIRCRAFT_JSON", "/run/readsb/aircraft.json")
-OUT_DIR = os.environ.get("IADMAP_POINTS_DIR", "/var/lib/iad-map/points")
+DRIVE = os.environ.get("IADMAP_DRIVE", "/mnt/flightdata")
+DB_PATH = os.environ.get("IADMAP_DB", os.path.join(DRIVE, "iad-map", "flights.db"))
 INTERVAL_S = float(os.environ.get("IADMAP_INTERVAL_S", "2"))
-KEEP_HOURS = 26
+COMMIT_EVERY_S = 30
 
-# The map's area: 50 statute miles around Dulles, at or below 15,000 ft.
-CENTER = (38.9444, -77.4558)
-RADIUS_NM = 43.45
-MAX_ALT_FT = 15000
-MAX_POS_AGE_S = 10  # ignore positions the receiver hasn't refreshed recently
-
-
-def dist_nm(lat1, lon1, lat2, lon2):
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    a = (math.sin((p2 - p1) / 2) ** 2
-         + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2)
-    return 3440.065 * 2 * math.asin(math.sqrt(a))
-
-
-def num(v, nd=0):
-    if isinstance(v, (int, float)):
-        return round(v, nd) if nd else int(round(v))
-    return None
+COLUMNS = ["t", "hex", "flight", "type", "category", "squawk", "lat", "lon", "pos_t",
+           "alt_baro", "on_ground", "alt_geom", "gs", "track", "baro_rate", "geom_rate",
+           "rssi", "mlat"]
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS positions (
+  t REAL NOT NULL, hex TEXT NOT NULL, flight TEXT, type TEXT, category TEXT, squawk TEXT,
+  lat REAL, lon REAL, pos_t REAL, alt_baro INTEGER, on_ground INTEGER,
+  alt_geom INTEGER, gs REAL, track REAL, baro_rate INTEGER, geom_rate INTEGER,
+  rssi REAL, mlat INTEGER);
+CREATE INDEX IF NOT EXISTS positions_t ON positions (t);
+"""
 
 
-def snapshot(last_seen):
-    with open(AIRCRAFT_JSON) as f:
-        data = json.load(f)
+def open_db(path):
+    db = sqlite3.connect(path)
+    db.execute("PRAGMA journal_mode=WAL")  # the publisher can read while this writes
+    db.executescript(SCHEMA)
+    return db
+
+
+def rows_from(data, last_msg):
+    """Rows for aircraft with a message newer than the one last recorded.
+    last_msg maps hex -> time of the last recorded message, and is updated."""
     now = data.get("now", time.time())
-    rows = []
+    out = []
     for ac in data.get("aircraft", []):
-        lat, lon = ac.get("lat"), ac.get("lon")
-        if lat is None or lon is None or ac.get("seen_pos", 99) > MAX_POS_AGE_S:
-            continue
-        alt = ac.get("alt_baro", ac.get("alt_geom"))
-        alt = 0 if alt == "ground" else num(alt)
-        if alt is None or alt > MAX_ALT_FT:
-            continue
-        if dist_nm(lat, lon, *CENTER) > RADIUS_NM:
-            continue
-        hexid = ac.get("hex", "")
-        t = int(now - ac.get("seen_pos", 0))
-        key = (round(lat, 5), round(lon, 5), alt)
-        if last_seen.get(hexid) == key:
-            continue  # same position as last time: nothing new
-        last_seen[hexid] = key
-        rows.append([
-            t, hexid, round(lat, 5), round(lon, 5), alt,
-            num(ac.get("gs")), num(ac.get("track")),
-            num(ac.get("baro_rate", ac.get("geom_rate"))),
-            (ac.get("flight") or "").strip(), ac.get("t") or "",
-            1 if "lat" in (ac.get("mlat") or []) else 0,
-        ])
-    return now, rows
-
-
-def prune():
-    cutoff = time.strftime("%Y%m%d%H", time.gmtime(time.time() - KEEP_HOURS * 3600))
-    for name in os.listdir(OUT_DIR):
-        if name.endswith(".jsonl") and name[:-6] < cutoff:
-            os.remove(os.path.join(OUT_DIR, name))
+        t = round(now - ac.get("seen", 1e9), 1)
+        if t <= last_msg.get(ac.get("hex"), 0):
+            continue  # nothing new from this aircraft since the last read
+        last_msg[ac.get("hex")] = t
+        alt = ac.get("alt_baro")
+        has_pos = ac.get("lat") is not None and ac.get("lon") is not None
+        out.append((
+            t, ac.get("hex", ""), (ac.get("flight") or "").strip() or None,
+            ac.get("t"), ac.get("category"), ac.get("squawk"),
+            ac.get("lat") if has_pos else None, ac.get("lon") if has_pos else None,
+            round(now - ac.get("seen_pos", 0), 1) if has_pos else None,
+            alt if isinstance(alt, (int, float)) else None, 1 if alt == "ground" else 0,
+            ac.get("alt_geom"), ac.get("gs"), ac.get("track"),
+            ac.get("baro_rate"), ac.get("geom_rate"), ac.get("rssi"),
+            1 if has_pos and "lat" in (ac.get("mlat") or []) else 0,
+        ))
+    return out
 
 
 def main():
-    os.makedirs(OUT_DIR, exist_ok=True)
-    last_seen, last_prune = {}, 0
+    if DB_PATH.startswith(DRIVE) and not os.path.ismount(DRIVE):
+        raise SystemExit(f"collector: {DRIVE} is not mounted; not writing to the SD card instead")
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    db = open_db(DB_PATH)
+    insert = f"INSERT INTO positions ({','.join(COLUMNS)}) VALUES ({','.join('?' * len(COLUMNS))})"
+    buffer, last_commit, last_msg = [], time.time(), {}
     while True:
         started = time.time()
         try:
-            now, rows = snapshot(last_seen)
-            if rows:
-                name = time.strftime("%Y%m%d%H", time.gmtime(now)) + ".jsonl"
-                with open(os.path.join(OUT_DIR, name), "a") as f:
-                    for r in rows:
-                        f.write(json.dumps(r, separators=(",", ":")) + "\n")
-            if len(last_seen) > 5000:
-                last_seen.clear()
-            if started - last_prune > 600:
-                prune()
-                last_prune = started
+            with open(AIRCRAFT_JSON) as f:
+                buffer.extend(rows_from(json.load(f), last_msg))
         except (OSError, ValueError) as e:
             print("collector: skipped a reading:", e, flush=True)
+        if started - last_commit >= COMMIT_EVERY_S and buffer:
+            db.executemany(insert, buffer)
+            db.commit()
+            buffer, last_commit = [], started
+            cutoff = started - 600
+            last_msg = {h: t for h, t in last_msg.items() if t > cutoff}
         time.sleep(max(0.2, INTERVAL_S - (time.time() - started)))
 
 

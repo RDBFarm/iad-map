@@ -6,7 +6,8 @@
 set -euo pipefail
 
 SRC=https://raw.githubusercontent.com/RDBFarm/iad-map/main/pi
-HOME_DIR=/var/lib/iad-map
+HOME_DIR=/var/lib/iad-map          # the GitHub key only; small
+DATA_DIR=/mnt/flightdata/iad-map   # the log and the publish copy, on the USB drive
 USER_NAME=iadmap
 
 if [ "$(id -u)" -ne 0 ]; then echo "Please run with sudo."; exit 1; fi
@@ -17,11 +18,15 @@ if ! command -v git >/dev/null; then
   echo "   installing git"; apt-get update -qq && apt-get install -y -qq git
 fi
 [ -r /run/readsb/aircraft.json ] || echo "   note: /run/readsb/aircraft.json not readable right now"
+if ! mountpoint -q /mnt/flightdata; then
+  echo "The USB drive is not mounted at /mnt/flightdata; stopping so nothing is written to the SD card."
+  exit 1
+fi
 
-echo "== Creating the $USER_NAME account and $HOME_DIR"
+echo "== Creating the $USER_NAME account, $HOME_DIR and $DATA_DIR"
 id "$USER_NAME" >/dev/null 2>&1 || useradd --system --home-dir "$HOME_DIR" --shell /usr/sbin/nologin "$USER_NAME"
-mkdir -p "$HOME_DIR/points" /opt/iad-map
-chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR"
+mkdir -p "$HOME_DIR" "$DATA_DIR" /opt/iad-map
+chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR" "$DATA_DIR"
 
 echo "== Downloading the programs"
 for f in collector.py publish.py; do
@@ -32,8 +37,9 @@ chmod 755 /opt/iad-map/*.py
 echo "== Setting up the services"
 cat > /etc/systemd/system/iad-map-collector.service <<UNIT
 [Unit]
-Description=IAD map: record aircraft positions
+Description=IAD map: log everything the receiver hears
 After=readsb.service
+RequiresMountsFor=/mnt/flightdata
 
 [Service]
 User=$USER_NAME
@@ -50,6 +56,7 @@ cat > /etc/systemd/system/iad-map-publish.service <<UNIT
 Description=IAD map: push the last 24 hours to GitHub
 After=network-online.target
 Wants=network-online.target
+RequiresMountsFor=/mnt/flightdata
 
 [Service]
 Type=oneshot
@@ -79,7 +86,7 @@ fi
 
 echo
 echo "=================================================================="
-echo " Recording has started. One step left: let this Pi write to GitHub."
+echo " Logging to $DATA_DIR/flights.db has started. One step left: let this Pi write to GitHub."
 echo " Copy the whole line below (it starts with ssh-ed25519):"
 echo
 cat "$HOME_DIR/deploy_key.pub"
