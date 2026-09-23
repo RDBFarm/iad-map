@@ -10,14 +10,17 @@ heat map of flight arrivals to IAD and surrounding airports
 The Raspberry Pi in the stables runs two small programs from `pi/`:
 
 - `collector.py` records every position its receiver hears within 50 miles of
-  Dulles and below 15,000 ft, every 10 seconds, and keeps about a day of it.
-- `publish.py` runs every 15 minutes, turns the last 24 hours into
-  `live_24h.json`, adds KIAD weather reports from aviationweather.gov, and
-  force-pushes it to the `live-data` branch. That branch only ever holds the
-  latest commit, so the repository doesn't grow.
+  Dulles and below 15,000 ft, every 2 seconds, and keeps about a day of it.
+- `publish.py` runs every 15 minutes and writes, on the `live-data` branch,
+  one file per hour of positions (`h/`) and an index, `live.json`, with the
+  counts and KIAD weather reports from aviationweather.gov. The branch is one
+  commit, amended and force-pushed each time, so the repository doesn't grow;
+  a finished hour's file never changes, so each push only uploads the current
+  hour.
 
-`live.html` reads that file from raw.githubusercontent.com, so GitHub Pages is
-not rebuilt on each update. Install or update on the Pi with
+`live.html` reads those files from raw.githubusercontent.com, and on its
+5-minute refresh fetches only the hour files that changed. GitHub Pages is not
+rebuilt. Install or update on the Pi with
 `curl -fsSL https://raw.githubusercontent.com/RDBFarm/iad-map/main/pi/install.sh | sudo bash`.
 
 The airport colours on the live map come from `publish.py`'s own rule: nearest
