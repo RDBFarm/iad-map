@@ -2,15 +2,22 @@
 """Publish the last 24 hours of recorded positions to GitHub.
 
 Run every 15 minutes by iad-map-publish.timer. Reads the collector's hourly
-files, builds live_24h.json in the shape live.html expects, and force-pushes
-it as the only commit on the `live-data` branch of RDBFarm/iad-map. Each push
-replaces the last, so the repository does not grow. live.html fetches the
-file from raw.githubusercontent.com; GitHub Pages is not rebuilt.
+files and writes, on the `live-data` branch of RDBFarm/iad-map:
+
+  live.json        what live.html reads first: the window, counts, KIAD
+                   weather, and the list of hour files with a hash of each
+  h/<hour>.json    one file per UTC hour of positions
+
+The branch is kept to a single commit that each run amends and force-pushes,
+so the repository does not grow. A finished hour's file comes out byte-for-
+byte the same on every run, so after its first upload git never sends it
+again: each push carries only the current hour and the index. live.html
+fetches from raw.githubusercontent.com, so GitHub Pages is not rebuilt.
 
   python3 publish.py            build and push
   python3 publish.py --no-push  build only, and print a summary
 """
-import json, math, os, shutil, subprocess, sys, time, urllib.request
+import hashlib, json, math, os, subprocess, sys, time, urllib.request
 
 POINTS_DIR = os.environ.get("IADMAP_POINTS_DIR", "/var/lib/iad-map/points")
 WORK_DIR = os.environ.get("IADMAP_PUBLISH_DIR", "/var/lib/iad-map/publish")
@@ -121,38 +128,54 @@ def fetch_weather(start):
     return out
 
 
+def hour_chunk(rows, hour_start):
+    """One hour's positions. Aircraft identity is stored once per hour in
+    `ac` as [hex, flight, type]; each point is
+    [lat, lon, alt_ft, seconds_into_hour, airport_id, ac_index, gs, track, vrate]."""
+    ac, ac_index, pts = [], {}, []
+    for t, hexid, lat, lon, alt, gs, track, vrate, flight, actype, mlat in rows:
+        key = (hexid, flight, actype)
+        if key not in ac_index:
+            ac_index[key] = len(ac)
+            ac.append([hexid, flight, actype])
+        pts.append([lat, lon, alt, t - hour_start, airport_for(lat, lon, alt),
+                    ac_index[key], gs, track, vrate])
+    return {"start": hour_start, "ac": ac, "pts": pts}
+
+
 def build(now):
+    """Returns (index, {filename: bytes})."""
     end = int(now)
     start = end - SPAN_S
-    raw = load_points(start, end)
-    raw.sort(key=lambda r: r[0])
-    pts, aircraft, mlat_ac, adsb_ac, mlat_pts = [], set(), set(), set(), 0
-    for t, hexid, lat, lon, alt, gs, track, vrate, flight, actype, mlat in raw:
-        if alt > MAX_ALT_FT:
-            continue
-        aircraft.add(hexid)
-        if mlat:
-            mlat_pts += 1
-            mlat_ac.add(hexid)
-        else:
-            adsb_ac.add(hexid)
-        pts.append([
-            lat, lon, round(max(0.0, min(1.0, 1 - alt / MAX_ALT_FT)), 3),
-            round((t - start) / 60, 2), airport_for(lat, lon, alt),
-            flight or hexid.upper(), actype, gs, alt, track, vrate,
-        ])
-    return {
+    first_hour = start - start % 3600
+    raw = [r for r in load_points(first_hour, end) if r[4] <= MAX_ALT_FT]
+    raw.sort(key=lambda r: (r[0], r[1]))
+    by_hour = {}
+    for r in raw:
+        by_hour.setdefault(r[0] - r[0] % 3600, []).append(r)
+    files, chunks = {}, []
+    for hour_start in sorted(by_hour):
+        name = "h/" + time.strftime("%Y%m%d%H", time.gmtime(hour_start)) + ".json"
+        body = json.dumps(hour_chunk(by_hour[hour_start], hour_start),
+                          separators=(",", ":")).encode()
+        files[name] = body
+        chunks.append({"name": name, "hash": hashlib.sha1(body).hexdigest()[:12]})
+    window = [r for r in raw if r[0] >= start]
+    mlat_ac = {r[1] for r in window if r[10]}
+    adsb_ac = {r[1] for r in window if not r[10]}
+    index = {
         "meta": {
             "start": start, "end": end, "built": end,
             "span_min": SPAN_S // 60,
-            "positions": len(pts), "aircraft": len(aircraft),
-            "mlat_positions": mlat_pts,
+            "positions": len(window), "aircraft": len(mlat_ac | adsb_ac),
+            "mlat_positions": sum(1 for r in window if r[10]),
             "aircraft_mlat_only": len(mlat_ac - adsb_ac),
             "receiver": "Red Devil Bison Farm, Poolesville MD",
         },
         "wx": fetch_weather(start),
-        "pts": pts,
+        "chunks": chunks,
     }
+    return index, files
 
 
 BRANCH_README = """# live-data
@@ -164,37 +187,63 @@ Do not edit it; the next push replaces it. The code that writes it is in
 """
 
 
-def push(payload):
-    shutil.rmtree(WORK_DIR, ignore_errors=True)
-    os.makedirs(WORK_DIR)
-    with open(os.path.join(WORK_DIR, "live_24h.json"), "w") as f:
-        json.dump(payload, f, separators=(",", ":"))
+def git(*args, env=None):
+    return subprocess.run(["git", *args], cwd=WORK_DIR, env=env, check=True,
+                          timeout=300, capture_output=True, text=True).stdout
+
+
+def write_tree(index, files):
+    os.makedirs(os.path.join(WORK_DIR, "h"), exist_ok=True)
+    for name in os.listdir(os.path.join(WORK_DIR, "h")):
+        if "h/" + name not in files:
+            os.remove(os.path.join(WORK_DIR, "h", name))
+    for name, body in files.items():
+        path = os.path.join(WORK_DIR, name)
+        try:
+            with open(path, "rb") as f:
+                if f.read() == body:
+                    continue
+        except OSError:
+            pass
+        with open(path, "wb") as f:
+            f.write(body)
+    with open(os.path.join(WORK_DIR, "live.json"), "w") as f:
+        json.dump(index, f, separators=(",", ":"))
     with open(os.path.join(WORK_DIR, "README.md"), "w") as f:
         f.write(BRANCH_README)
+
+
+def push(index, files):
+    os.makedirs(WORK_DIR, exist_ok=True)
+    if not os.path.isdir(os.path.join(WORK_DIR, ".git")):
+        git("init", "-q")
+        git("symbolic-ref", "HEAD", f"refs/heads/{BRANCH}")
+    write_tree(index, files)
     env = dict(os.environ, GIT_SSH_COMMAND=(
         f"ssh -i {DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "
         f"-o UserKnownHostsFile={os.path.dirname(DEPLOY_KEY)}/known_hosts"))
-    stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(payload["meta"]["end"]))
-    for cmd in (
-        ["git", "init", "-q"],
-        ["git", "symbolic-ref", "HEAD", f"refs/heads/{BRANCH}"],
-        ["git", "add", "-A"],
-        ["git", "-c", "user.name=RDBF ADS-B receiver", "-c", "user.email=adsb-receiver@localhost",
-         "commit", "-q", "-m", f"Rolling 24 hours to {stamp}"],
-        ["git", "push", "-q", "--force", REMOTE, f"HEAD:{BRANCH}"],
-    ):
-        subprocess.run(cmd, cwd=WORK_DIR, env=env, check=True, timeout=300)
+    stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(index["meta"]["end"]))
+    has_commit = subprocess.run(["git", "rev-parse", "-q", "--verify", "HEAD"], cwd=WORK_DIR,
+                                capture_output=True).returncode == 0
+    git("add", "-A")
+    git("-c", "user.name=RDBF ADS-B receiver", "-c", "user.email=adsb-receiver@localhost",
+        "commit", "-q", *(["--amend"] if has_commit else []), "-m", f"Rolling 24 hours to {stamp}")
+    # The previous commit is still in the local object store, so git sees the
+    # remote already has every unchanged hour file and sends only the new ones.
+    git("push", "-q", "--force", REMOTE, f"HEAD:{BRANCH}", env=env)
+    git("reflog", "expire", "--expire=now", "--all")
+    git("gc", "-q", "--prune=now")
 
 
 def main():
-    payload = build(time.time())
-    m = payload["meta"]
+    index, files = build(time.time())
+    m = index["meta"]
     print(f"publish: {m['positions']} positions, {m['aircraft']} aircraft, "
           f"{m['mlat_positions']} MLAT positions, {m['aircraft_mlat_only']} aircraft seen only by MLAT, "
-          f"{len(payload['wx'])} weather reports", flush=True)
+          f"{len(index['wx'])} weather reports, {len(files)} hour files", flush=True)
     if "--no-push" in sys.argv:
         return
-    push(payload)
+    push(index, files)
     print("publish: pushed to", BRANCH, flush=True)
 
 

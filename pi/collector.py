@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Record aircraft positions heard by this receiver.
 
-Every 10 seconds, reads the receiver's current picture (readsb writes it to
+Every 2 seconds, reads the receiver's current picture (readsb writes it to
 /run/readsb/aircraft.json) and appends each fresh position inside the map's
 area to an hourly file under /var/lib/iad-map/points/. Files older than
 26 hours are deleted, so the disk holds about a day of history.
@@ -14,7 +14,7 @@ import json, math, os, time
 
 AIRCRAFT_JSON = os.environ.get("IADMAP_AIRCRAFT_JSON", "/run/readsb/aircraft.json")
 OUT_DIR = os.environ.get("IADMAP_POINTS_DIR", "/var/lib/iad-map/points")
-INTERVAL_S = 10
+INTERVAL_S = float(os.environ.get("IADMAP_INTERVAL_S", "2"))
 KEEP_HOURS = 26
 
 # The map's area: 50 statute miles around Dulles, at or below 15,000 ft.
@@ -94,7 +94,7 @@ def main():
                 last_prune = started
         except (OSError, ValueError) as e:
             print("collector: skipped a reading:", e, flush=True)
-        time.sleep(max(1, INTERVAL_S - (time.time() - started)))
+        time.sleep(max(0.2, INTERVAL_S - (time.time() - started)))
 
 
 if __name__ == "__main__":
