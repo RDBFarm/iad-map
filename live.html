@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>IAD Flight Activity — Live</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; height:-webkit-fill-available; }
+  body { font-family:'Segoe UI',Arial,sans-serif; background:#0a0a14; color:#e0e0f0;
+          min-height:100vh; min-height:-webkit-fill-available; }
+  #hdr {
+    position:absolute; top:0; left:0; right:0; z-index:1000;
+    background:rgba(10,10,20,0.92); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    padding:10px 20px; display:flex; align-items:center; gap:16px;
+    border-bottom:1px solid rgba(255,255,255,0.08);
+  }
+  #hdr h1 { font-size:1rem; font-weight:600; color:#fff; white-space:nowrap; }
+  #hdr .sub { font-size:0.7rem; color:#7788aa; }
+  .badge {
+    background:rgba(64,180,255,0.12); border:1px solid rgba(64,180,255,0.3);
+    color:#40b4ff; padding:2px 10px; border-radius:20px; font-size:0.7rem; white-space:nowrap;
+  }
+  #map { position:absolute; top:50px; bottom:130px; left:0; right:0; }
+  @supports (height: 100dvh) {
+    #map { bottom: 130px; }
+  }
+  #controls {
+    position:absolute; bottom:0; left:0; right:0; height:130px; z-index:1000;
+    background:rgba(10,10,20,0.95); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    border-top:1px solid rgba(255,255,255,0.08);
+    display:flex; flex-direction:column; justify-content:center;
+    padding:0 24px; gap:10px;
+  }
+  #time-row { display:flex; align-items:center; gap:20px; }
+  #clock { font-size:2rem; font-weight:700; color:#fff; letter-spacing:2px;
+            font-variant-numeric:tabular-nums; min-width:140px; }
+  #date-lbl { font-size:0.75rem; color:#7788aa; }
+  #period-lbl { font-size:0.8rem; padding:3px 12px; border-radius:12px;
+                 background:rgba(64,180,255,0.15); color:#40b4ff;
+                 border:1px solid rgba(64,180,255,0.3); }
+  #pt-count { font-size:0.72rem; color:#7788aa; margin-left:auto; }
+  #slider-row { display:flex; align-items:center; gap:12px; }
+  #timeline {
+    flex:1; -webkit-appearance:none; appearance:none;
+    height:4px; border-radius:2px; outline:none; cursor:pointer;
+    background:#334;
+  }
+  #timeline::-webkit-slider-thumb {
+    -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+    background:#40b4ff; cursor:pointer; box-shadow:0 0 6px rgba(64,180,255,0.6);
+  }
+  #btn-row { display:flex; align-items:center; gap:10px; }
+  .btn {
+    background:rgba(64,180,255,0.12); border:1px solid rgba(64,180,255,0.3);
+    color:#40b4ff; padding:5px 14px; border-radius:6px; font-size:0.78rem;
+    cursor:pointer; transition:background 0.15s; white-space:nowrap;
+  }
+  .btn:hover { background:rgba(64,180,255,0.25); }
+  .btn.active { background:rgba(64,180,255,0.3); color:#fff; }
+  .ctrl-lbl { font-size:0.72rem; color:#7788aa; white-space:nowrap; }
+  .ctrl-slider {
+    -webkit-appearance:none; appearance:none; height:4px;
+    border-radius:2px; background:#334; outline:none; cursor:pointer;
+  }
+  .ctrl-slider::-webkit-slider-thumb {
+    -webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+    background:#7ec8e3; cursor:pointer;
+  }
+  #leg {
+    position:absolute; bottom:138px; left:14px; z-index:1000;
+    background:rgba(10,10,20,0.85); -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px);
+    border:1px solid rgba(255,255,255,0.08); border-radius:8px;
+    padding:10px 13px; font-size:0.7rem; color:#aab; min-width:160px;
+  }
+  #leg h3 { font-size:0.75rem; color:#dde; margin-bottom:6px; }
+  .gb { width:100%; height:8px; border-radius:4px;
+         background:linear-gradient(to right,navy,blue,cyan,lime,yellow,red);
+         margin:3px 0 4px; }
+  .gl { display:flex; justify-content:space-between; color:#667; }
+  #wx {
+    position:absolute; bottom:162px; right:14px; z-index:1000;
+    background:rgba(10,10,20,0.88); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+    border:1px solid rgba(255,255,255,0.08); border-radius:10px;
+    padding:12px 16px; min-width:210px; font-size:0.76rem; color:#ccd;
+  }
+  #wx h3 { font-size:0.78rem; color:#dde; margin-bottom:10px;
+            display:flex; align-items:center; gap:6px; }
+  #wx h3 span { font-size:0.65rem; color:#7788aa; font-weight:normal; }
+  .wx-row {
+    display:flex; align-items:center; gap:8px;
+    padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05); line-height:1.4;
+  }
+  .wx-row:last-child { border-bottom:none; }
+  .wx-icon { font-size:1rem; min-width:22px; text-align:center; }
+  .wx-label { color:#8899bb; font-size:0.68rem; }
+  .wx-val { color:#eef; font-weight:600; }
+  #wind-arrow { display:inline-block; font-size:1.1rem; transition:transform 0.5s ease; }
+
+  /* airport toggle panel */
+  #ap-panel {
+    position:absolute; top:58px; right:14px; z-index:1000;
+    background:rgba(10,10,20,0.88); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+    border:1px solid rgba(255,255,255,0.08); border-radius:10px;
+    padding:10px 14px; font-size:0.72rem; color:#ccd; min-width:175px;
+  }
+  #ap-panel h3 { font-size:0.75rem; color:#dde; margin-bottom:8px; }
+  .ap-toggle {
+    display:flex; align-items:center; gap:8px;
+    padding:3px 0; cursor:pointer; user-select:none; -webkit-user-select:none;
+    border-radius:4px; transition:opacity 0.15s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ap-toggle:hover { opacity:0.85; }
+  .ap-dot {
+    width:10px; height:10px; border-radius:50%; flex-shrink:0;
+    border:2px solid rgba(255,255,255,0.3);
+  }
+  .ap-toggle.off { opacity:0.35; }
+  .ap-name { flex:1; }
+  .ap-badge {
+    font-size:0.62rem; color:#667; background:rgba(255,255,255,0.06);
+    padding:1px 5px; border-radius:8px;
+  }
+  .divider { border-top:1px solid rgba(255,255,255,0.07); margin:6px 0; }
+
+  /* search panel */
+  #search-panel {
+    position:absolute; top:58px; left:50px; z-index:1001;
+    background:rgba(10,10,20,0.92); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,0.08); border-radius:10px;
+    padding:10px 14px; font-size:0.72rem; color:#ccd; width:230px;
+  }
+  #search-panel h3 { font-size:0.75rem; color:#dde; margin-bottom:8px; }
+  #search-input {
+    width:100%; background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.15);
+    border-radius:6px; padding:5px 8px; color:#eef; font-size:0.75rem; outline:none;
+  }
+  #search-input::placeholder { color:#556; }
+  #search-results {
+    margin-top:8px; max-height:200px; overflow-y:auto;
+    scrollbar-width:thin; scrollbar-color:#334 transparent;
+  }
+  .search-result {
+    padding:4px 6px; border-radius:4px; cursor:pointer;
+    display:flex; justify-content:space-between; align-items:center;
+    border-bottom:1px solid rgba(255,255,255,0.04);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .search-result:hover { background:rgba(64,180,255,0.1); }
+  .search-result.active { background:rgba(64,180,255,0.2); }
+  .sr-flight { color:#40b4ff; font-weight:600; font-size:0.73rem; }
+  .sr-type  { color:#7788aa; font-size:0.68rem; }
+  .sr-time  { color:#aab; font-size:0.68rem; white-space:nowrap; }
+  #search-clear {
+    position:absolute; right:20px; top:50%; transform:translateY(-50%);
+    color:#556; cursor:pointer; font-size:0.9rem; display:none;
+  }
+  #search-wrap { position:relative; }
+  #search-count { font-size:0.65rem; color:#556; margin-top:4px; }
+
+  /* click popup */
+  #dot-popup {
+    position:absolute; z-index:2000; display:none;
+    background:rgba(10,10,20,0.95); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,0.12); border-radius:10px;
+    padding:12px 16px; min-width:200px; max-width:260px;
+    font-size:0.76rem; color:#ccd; pointer-events:none;
+  }
+  #dot-popup h4 { font-size:0.85rem; color:#fff; margin-bottom:8px; }
+  #dot-popup .pop-row { display:flex; justify-content:space-between;
+    padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
+  #dot-popup .pop-row:last-child { border-bottom:none; }
+  #dot-popup .pop-lbl { color:#7788aa; }
+  #dot-popup .pop-val { color:#eef; font-weight:600; }
+</style>
+</head>
+<body>
+<div id="hdr">
+  <div>
+    <h1>✈ IAD Flight Activity</h1>
+    <div class="sub">Washington Dulles · last 24 hours · 50-mile radius · RDBF receiver · <span id="updated">loading…</span></div>
+  </div>
+  <span class="badge" id="badge-pos">— positions</span>
+  <button class="btn" id="btn-mapstyle" onclick="toggleMapStyle()" style="margin-left:auto">🌙 Night Map</button>
+  <span class="badge" id="badge-ac">— aircraft</span>
+  <span class="badge">≤ 15,000 ft</span>
+</div>
+
+<div id="map"></div>
+
+<div id="leg">
+  <h3>Density / Altitude</h3>
+  <div class="gb"></div>
+  <div class="gl"><span>Sparse/High</span><span>Dense/Low</span></div>
+  <div style="margin-top:6px;line-height:1.7;color:#556;font-size:0.67rem">
+    Red = dense &amp; near ground<br>Blue = sparse / high alt
+  </div>
+</div>
+
+<div id="search-panel">
+  <h3>🔍 Flight Search</h3>
+  <div id="search-wrap">
+    <input type="text" id="search-input" placeholder="Flight, type, or family (e.g. 737, V22)…" autocomplete="off">
+    <span id="search-clear" onclick="clearSearch()">✕</span>
+  </div>
+  <div id="search-count"></div>
+  <div id="search-results"></div>
+</div>
+
+<div id="ap-panel">
+  <h3>✈ Airport Filter</h3>
+  <div class="ap-toggle active" id="tog-KIAD" onclick="toggleAP(0,'KIAD')">
+    <div class="ap-dot" style="background:#40b4ff"></div>
+    <span class="ap-name">KIAD — Dulles</span>
+  </div>
+  <div class="ap-toggle active" id="tog-KDCA" onclick="toggleAP(1,'KDCA')">
+    <div class="ap-dot" style="background:#60d060"></div>
+    <span class="ap-name">KDCA — Reagan Natl</span>
+  </div>
+  <div class="ap-toggle active" id="tog-KBWI" onclick="toggleAP(2,'KBWI')">
+    <div class="ap-dot" style="background:#ff9f40"></div>
+    <span class="ap-name">KBWI — BWI</span>
+  </div>
+  <div class="ap-toggle active" id="tog-KJYO" onclick="toggleAP(3,'KJYO')">
+    <div class="ap-dot" style="background:#cc88ff"></div>
+    <span class="ap-name">KJYO — Leesburg</span>
+  </div>
+  <div class="ap-toggle active" id="tog-KGAI" onclick="toggleAP(4,'KGAI')">
+    <div class="ap-dot" style="background:#ff6688"></div>
+    <span class="ap-name">KGAI — Gaithersburg</span>
+  </div>
+  <div class="ap-toggle active" id="tog-KHEF" onclick="toggleAP(5,'KHEF')">
+    <div class="ap-dot" style="background:#ffdd44"></div>
+    <span class="ap-name">KHEF — Manassas</span>
+  </div>
+  <div class="ap-toggle active" id="tog-KRMN" onclick="toggleAP(6,'KRMN')">
+    <div class="ap-dot" style="background:#44ddcc"></div>
+    <span class="ap-name">KRMN — Stafford</span>
+  </div>
+  <div class="ap-toggle active" id="tog-KADW" onclick="toggleAP(8,'KADW')">
+    <div class="ap-dot" style="background:#ff6464"></div>
+    <span class="ap-name">KADW — Andrews AFB</span>
+  </div>
+  <div class="ap-toggle active" id="tog-KNYG" onclick="toggleAP(9,'KNYG')">
+    <div class="ap-dot" style="background:#64c88c"></div>
+    <span class="ap-name">KNYG — Quantico MCAF</span>
+  </div>
+  <div class="divider"></div>
+  <div class="ap-toggle active" id="tog-enroute" onclick="toggleAP(7,'enroute')">
+    <div class="ap-dot" style="background:#888899"></div>
+    <span class="ap-name">En-route / high alt</span>
+  </div>
+</div>
+
+<div id="wx">
+  <h3>🌤 KIAD Weather <span id="wx-time"></span></h3>
+  <div class="wx-row">
+    <span class="wx-icon">🌡</span>
+    <div><div class="wx-label">Temperature</div><div class="wx-val" id="wx-temp">—</div></div>
+  </div>
+  <div class="wx-row">
+    <span class="wx-icon"><span id="wind-arrow">↑</span></span>
+    <div><div class="wx-label">Wind</div><div class="wx-val" id="wx-wind">—</div></div>
+  </div>
+  <div class="wx-row">
+    <span class="wx-icon">👁</span>
+    <div><div class="wx-label">Visibility</div><div class="wx-val" id="wx-vsby">—</div></div>
+  </div>
+  <div class="wx-row">
+    <span class="wx-icon">☁</span>
+    <div><div class="wx-label">Sky</div><div class="wx-val" id="wx-sky">—</div></div>
+  </div>
+  <div class="wx-row" id="wx-wxrow" style="display:none">
+    <span class="wx-icon">🌧</span>
+    <div><div class="wx-label">Weather</div><div class="wx-val" id="wx-wx">—</div></div>
+  </div>
+</div>
+
+<div id="dot-popup">
+  <h4 id="pop-title">—</h4>
+  <div class="pop-row"><span class="pop-lbl">Altitude</span><span class="pop-val" id="pop-alt">—</span></div>
+  <div class="pop-row"><span class="pop-lbl">Speed</span><span class="pop-val" id="pop-spd">—</span></div>
+  <div class="pop-row"><span class="pop-lbl">Airport</span><span class="pop-val" id="pop-ap">—</span></div>
+  <div class="pop-row"><span class="pop-lbl">Time</span><span class="pop-val" id="pop-time">—</span></div>
+</div>
+
+<div id="controls">
+  <div id="time-row">
+    <div id="clock">—</div>
+    <div>
+      <div id="date-lbl">Last 24 hours · Eastern time</div>
+      <div id="period-lbl">🌙 Night</div>
+    </div>
+    <div id="pt-count">— positions visible</div>
+  </div>
+  <div id="slider-row">
+    <span class="ctrl-lbl" id="tl-start">—</span>
+    <input type="range" id="timeline" min="0" max="1440" value="1440" step="1">
+    <span class="ctrl-lbl" id="tl-end">now</span>
+  </div>
+  <div id="btn-row">
+    <button class="btn" id="btn-play" onclick="togglePlay()">▶ Play</button>
+    <button class="btn" onclick="jumpTo(0)">⏮</button>
+    <button class="btn" onclick="jumpTo(SPAN)">Now</button>
+    <button class="btn" onclick="stepMin(-60)">−1h</button>
+    <button class="btn" onclick="stepMin(60)">+1h</button>
+    <span class="ctrl-lbl" style="margin-left:8px">Speed: <b id="speed-val">8×</b></span>
+    <input type="range" class="ctrl-slider" id="speed" min="1" max="10" value="5"
+           style="width:100px" oninput="updateSpeed()">
+    <span class="ctrl-lbl" style="margin-left:12px">Window: <b id="win-val">8 min</b></span>
+    <input type="range" class="ctrl-slider" id="winslider" min="1" max="30" value="8"
+           style="width:90px" oninput="updateWindow()">
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+let ALL_PTS = [];   // filled by loadData() from the Pi's live_24h.json
+let WX = [];
+let META = null;
+let SPAN = 1440;     // minutes on the timeline
+const AP_INFO    = JSON.parse("{\"KIAD\": {\"name\": \"Dulles\", \"lat\": 38.9444, \"lon\": -77.4558}, \"KDCA\": {\"name\": \"Reagan Natl\", \"lat\": 38.8521, \"lon\": -77.0377}, \"KBWI\": {\"name\": \"BWI\", \"lat\": 39.1754, \"lon\": -76.6683}, \"KJYO\": {\"name\": \"Leesburg\", \"lat\": 39.0779, \"lon\": -77.5578}, \"KGAI\": {\"name\": \"Gaithersburg\", \"lat\": 39.1683, \"lon\": -77.166}, \"KHEF\": {\"name\": \"Manassas\", \"lat\": 38.7214, \"lon\": -77.5153}, \"KRMN\": {\"name\": \"Stafford\", \"lat\": 38.5997, \"lon\": -77.4542}, \"KADW\": {\"name\": \"Andrews AFB\", \"lat\": 38.8108, \"lon\": -76.8674}, \"KNYG\": {\"name\": \"Quantico MCAF\", \"lat\": 38.5036, \"lon\": -77.305}}");
+const PARCELS    = [{"type":"Feature","id":1229828,"geometry":{"type":"Polygon","coordinates":[[[-77.45387823334337,39.15179512095617],[-77.45584338516397,39.15253288009478],[-77.46553864151404,39.155998292902204],[-77.46564661002803,39.155416994240916],[-77.46672679463131,39.15367920373133],[-77.46807008949311,39.152485713697274],[-77.46933794293903,39.151290366416035],[-77.46957594079377,39.151065979048816],[-77.47035481607772,39.15033162431986],[-77.47034821256207,39.15030573521669],[-77.46272425476319,39.14725936707092],[-77.45673050115145,39.14486751323026],[-77.45580846225899,39.1463113810829],[-77.45743710517415,39.1463961623441],[-77.45730114785086,39.1491877192517],[-77.45508602183614,39.149074063871076],[-77.45527212761019,39.15128833226542],[-77.45403931474854,39.15110383734855],[-77.45387823334337,39.15179512095617]]]},"properties":{"PREMSNUM":"18020","PREMSNAM":"EDWARDS FERRY","PREMSTYP":"RD","PREMCITY":"POOLESVILLE","ACRES":214.39,"DESCLU":"Agricultural","ZONING":"AR"}}];
+
+// Index: airport code → numeric id for fast filtering
+const AP_CODES = {"KIAD":0,"KDCA":1,"KBWI":2,"KJYO":3,"KGAI":4,"KHEF":5,"KRMN":6,"enroute":7,"KADW":8,"KNYG":9};
+// live_24h.json already carries airport ids as numbers
+
+// Active filter set — all on by default except enroute
+const activeAP = new Set([0,1,2,3,4,5,6,7,8,9]);
+
+// ── Map setup ─────────────────────────────────────────────────────────────
+const map = L.map('map', {center:[38.9444,-77.4558], zoom:9});
+
+// ── Airport markers — small uniform dots for all airports ────────────────
+// [lat, lon, label, color, radius]
+const AP_MARKER_INFO = [
+  [38.9444,-77.4558, 'KIAD — Washington Dulles',    '#40b4ff', 5],
+  [38.8521, -77.0377,   'KDCA — Reagan National',      '#60d060', 5],
+  [39.1754, -76.6683,   'KBWI — Baltimore/Washington', '#ff9f40', 5],
+  [39.0779, -77.5578,   'KJYO — Leesburg Executive',   '#cc88ff', 3],
+  [39.1683, -77.1660,   'KGAI — Montgomery Airpark',   '#ff6688', 3],
+  [38.7214, -77.5153,   'KHEF — Manassas Regional',    '#ffdd44', 3],
+  [38.5997, -77.4542,   'KRMN — Stafford Regional',    '#44ddcc', 3],
+  [38.8108, -76.8674,   'KADW — Joint Base Andrews',   '#ff6464', 3],
+  [38.5036, -77.3050,   'KNYG — Quantico MCAF',        '#64c88c', 3],
+];
+AP_MARKER_INFO.forEach(([lat, lon, label, color, radius]) => {
+  L.circleMarker([lat, lon], {
+    radius, color, fillColor: color,
+    fillOpacity: 1, weight: 1.5
+  }).addTo(map).bindTooltip(label, {direction:'top'});
+});
+
+// Subtle 50-mile radius ring around KIAD
+L.circle([38.9444,-77.4558],
+  {radius:80467, color:'rgba(64,180,255,0.2)',
+    fillColor:'transparent', weight:1, dashArray:'6 5'}).addTo(map);
+
+// ── Aircraft family groupings ────────────────────────────────────────────
+const AC_FAMILIES = {
+  '737':    ['B737','B738','B739','B38M','B39M'],
+  '747':    ['B744','B748','B74S'],
+  '757':    ['B752','B753'],
+  '767':    ['B762','B763','B764'],
+  '777':    ['B772','B77W','B77L'],
+  '787':    ['B788','B789','B78X'],
+  'A320':   ['A318','A319','A320','A321','A20N','A21N'],
+  'A330':   ['A332','A333','A339'],
+  'A340':   ['A343','A346'],
+  'A350':   ['A359','A35K'],
+  'A380':   ['A388'],
+  'Regional':['CRJ7','CRJ9','E170','E190','E75L','E75S','BCS3','B712'],
+  'Bizjet': ['GLF5','GLF6','GL7T','GL5T','GLEX','C68A','C56X','GA5C','GA6C','MD52','C25B','LJ45'],
+  'Legacy': ['MD11','A306'],
+};
+
+// Build reverse lookup: type code → family name
+const TYPE_TO_FAMILY = {};
+Object.entries(AC_FAMILIES).forEach(([family, types]) => {
+  types.forEach(t => TYPE_TO_FAMILY[t] = family);
+});
+
+// Military types keep exact codes — not in any family
+const MILITARY_TYPES = new Set(['V22','C17','C130','C30J','K35R','H60','B212',
+                                  'S61','A139','EC45','EC35','AS65','MD52']);
+
+function getDisplayType(code) {
+  if (!code) return '';
+  if (MILITARY_TYPES.has(code)) return code;
+  return TYPE_TO_FAMILY[code] || code;
+}
+
+// ── Search / highlight state ──────────────────────────────────────────────
+let searchActive   = false;
+let highlightTypes = null;  // Set of raw type codes to highlight
+let highlightFlights = null; // Set of flight callsigns to highlight
+
+function matchesSearch(p) {
+  if (!searchActive) return true;
+  const flight  = (p[5] || '').toUpperCase();
+  const rawType = (p[6] || '').toUpperCase();
+  if (highlightFlights && highlightFlights.has(flight)) return true;
+  if (highlightTypes   && highlightTypes.has(rawType))  return true;
+  return false;
+}
+
+function doSearch(query) {
+  query = query.trim().toUpperCase();
+  if (!query) { clearSearch(); return; }
+
+  document.getElementById('search-clear').style.display = 'block';
+  searchActive = true;
+  highlightTypes   = new Set();
+  highlightFlights = new Set();
+
+  // Check if query matches a family name
+  const familyMatch = Object.entries(AC_FAMILIES).find(
+    ([fam]) => fam.toUpperCase() === query || fam.toUpperCase().includes(query)
+  );
+  if (familyMatch) {
+    familyMatch[1].forEach(t => highlightTypes.add(t));
+  }
+
+  // Check if query matches raw type codes
+  ALL_PTS.forEach(p => {
+    const rawType = (p[6] || '').toUpperCase();
+    const flight  = (p[5] || '').toUpperCase();
+    if (rawType === query || rawType.includes(query)) highlightTypes.add(rawType);
+    if (flight  === query || flight.includes(query))  highlightFlights.add(flight);
+  });
+
+  // Build result list — unique flights matching, sorted by time
+  const seen = new Set();
+  const results = [];
+  ALL_PTS.forEach(p => {
+    if (!matchesSearch(p)) return;
+    const key = p[5] + ':' + p[6];
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push({
+      flight:  p[5] || '—',
+      rawType: p[6] || '',
+      dispType: getDisplayType(p[6]),
+      time:    p[3],
+      ap:      p[4]
+    });
+  });
+  results.sort((a,b) => a.time - b.time);
+
+  const AP_NAMES_S = {0:'KIAD',1:'KDCA',2:'KBWI',3:'KJYO',4:'KGAI',
+                       5:'KHEF',6:'KRMN',7:'En-route',8:'KADW',9:'KNYG'};
+  const el = document.getElementById('search-results');
+  el.innerHTML = '';
+  results.forEach((r,i) => {
+    const edtMin = utcToEdt(r.time);
+    const timeStr = edtToDisplay(edtMin);
+    const div = document.createElement('div');
+    div.className = 'search-result';
+    div.innerHTML = `<span><span class="sr-flight">${r.flight}</span>
+      <span class="sr-type"> · ${r.dispType}</span></span>
+      <span class="sr-time">${timeStr}</span>`;
+    div.onclick = () => selectResult(div, r.time, r.flight, r.rawType);
+    el.appendChild(div);
+  });
+
+  document.getElementById('search-count').textContent =
+    results.length ? results.length + ' flight' + (results.length>1?'s':'') + ' found' : 'No matches';
+  redraw();
+}
+
+let selectedResultEl = null;
+let pulsePos = null;   // {x, y, lat, lon} of pulsating dot
+let pulseAnim = null;  // requestAnimationFrame handle
+
+function selectResult(el, utcTime, flight, rawType) {
+  if (selectedResultEl) selectedResultEl.classList.remove('active');
+  selectedResultEl = el;
+  el.classList.add('active');
+
+  // Pause playback
+  if (playing) togglePlay();
+
+  // Jump to just before this flight appears so trail builds up
+  _curMin = Math.max(0, utcTime - _winMin);
+  redraw();
+
+  // Find first point for this flight to place pulse dot
+  const fp = ALL_PTS.find(p =>
+    p[3] >= utcTime - 0.5 && p[3] <= utcTime + 2 &&
+    (p[5] === flight || p[6] === rawType)
+  );
+  if (fp) {
+    const lp = map.latLngToContainerPoint([fp[0], fp[1]]);
+    pulsePos = {lat: fp[0], lon: fp[1]};
+    startPulse();
+  }
+}
+
+// Dedicated pulse canvas — sits above the main canvas, never conflicts
+const pulseCanvas = document.createElement('canvas');
+pulseCanvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:500;';
+document.getElementById('map').appendChild(pulseCanvas);
+const pulseCtx = pulseCanvas.getContext('2d');
+
+// Keep pulse canvas sized with map
+map.on('resize moveend zoomend', () => {
+  const size = map.getSize();
+  pulseCanvas.width  = size.x;
+  pulseCanvas.height = size.y;
+});
+const ms = map.getSize();
+pulseCanvas.width  = ms.x;
+pulseCanvas.height = ms.y;
+
+function startPulse() {
+  if (pulseAnim) cancelAnimationFrame(pulseAnim);
+  let phase = 0;
+
+  function drawPulse() {
+    if (!pulsePos) return;
+    const lp = map.latLngToLayerPoint([pulsePos.lat, pulsePos.lon]);
+    const tl = map.containerPointToLayerPoint([0,0]);
+    const x  = lp.x - tl.x;
+    const y  = lp.y - tl.y;
+
+    pulseCtx.clearRect(0, 0, pulseCanvas.width, pulseCanvas.height);
+    phase = (phase + 0.05) % (Math.PI * 2);
+    const scale   = 1 + Math.sin(phase) * 0.6;
+    const alpha   = 0.85 - Math.sin(phase) * 0.35;
+    const pColor  = isDark ? '255,255,255' : '0,0,0';
+
+    // Inner solid dot
+    pulseCtx.beginPath();
+    pulseCtx.arc(x, y, 6, 0, Math.PI * 2);
+    pulseCtx.fillStyle = `rgba(${pColor},${alpha.toFixed(2)})`;
+    pulseCtx.fill();
+
+    // Expanding ring 1
+    pulseCtx.beginPath();
+    pulseCtx.arc(x, y, 10 * scale, 0, Math.PI * 2);
+    pulseCtx.strokeStyle = `rgba(${pColor},${(alpha*0.6).toFixed(2)})`;
+    pulseCtx.lineWidth = 2;
+    pulseCtx.stroke();
+
+    // Expanding ring 2
+    pulseCtx.beginPath();
+    pulseCtx.arc(x, y, 18 * scale, 0, Math.PI * 2);
+    pulseCtx.strokeStyle = `rgba(${pColor},${(alpha*0.25).toFixed(2)})`;
+    pulseCtx.lineWidth = 1.5;
+    pulseCtx.stroke();
+
+    pulseAnim = requestAnimationFrame(drawPulse);
+  }
+  pulseAnim = requestAnimationFrame(drawPulse);
+}
+
+function stopPulse() {
+  if (pulseAnim) { cancelAnimationFrame(pulseAnim); pulseAnim = null; }
+  pulsePos = null;
+  pulseCtx.clearRect(0, 0, pulseCanvas.width, pulseCanvas.height);
+}
+
+function clearSearch() {
+  searchActive     = false;
+  highlightTypes   = null;
+  highlightFlights = null;
+  selectedResultEl = null;
+  stopPulse();
+  document.getElementById('search-input').value = '';
+  document.getElementById('search-results').innerHTML = '';
+  document.getElementById('search-count').textContent = '';
+  document.getElementById('search-clear').style.display = 'none';
+  redraw();
+}
+
+document.getElementById('search-input').addEventListener('input', function() {
+  doSearch(this.value);
+});
+
+// ── Map style toggle ──────────────────────────────────────────────────────
+const TILE_DARK  = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=cb1_2vf8_1_82e754999cedcd91f5532f97';
+const TILE_LIGHT = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png?key=cb1_2vf8_1_82e754999cedcd91f5532f97';
+const TILE_ATTR  = '© OpenStreetMap © CARTO';
+let isDark = true;
+let tileLayer = L.tileLayer(TILE_DARK, {attribution:TILE_ATTR, subdomains:'abcd', maxZoom:14}).addTo(map);
+
+function toggleMapStyle() {
+  isDark = !isDark;
+  map.removeLayer(tileLayer);
+  tileLayer = L.tileLayer(isDark ? TILE_DARK : TILE_LIGHT,
+    {attribution:TILE_ATTR, subdomains:'abcd', maxZoom:14}).addTo(map);
+  // Move tile layer to bottom so dots stay on top
+  tileLayer.bringToBack();
+  document.getElementById('btn-mapstyle').textContent = isDark ? '🌙 Night Map' : '☀️ Day Map';
+  // Adjust header/controls background for readability
+  const bg  = isDark ? 'rgba(10,10,20,0.92)' : 'rgba(240,240,250,0.92)';
+  const bg2 = isDark ? 'rgba(10,10,20,0.95)' : 'rgba(240,240,250,0.95)';
+  const clr = isDark ? '#e0e0f0' : '#111122';
+  document.getElementById('hdr').style.background = bg;
+  document.getElementById('controls').style.background = bg2;
+  document.getElementById('leg').style.background = isDark ? 'rgba(10,10,20,0.85)' : 'rgba(240,240,250,0.85)';
+  document.getElementById('wx').style.background  = isDark ? 'rgba(10,10,20,0.88)' : 'rgba(240,240,250,0.88)';
+  document.getElementById('ap-panel').style.background = isDark ? 'rgba(10,10,20,0.88)' : 'rgba(240,240,250,0.88)';
+  document.getElementById('dot-popup').style.background    = isDark ? 'rgba(10,10,20,0.95)' : 'rgba(240,240,250,0.95)';
+  document.getElementById('search-panel').style.background = isDark ? 'rgba(10,10,20,0.92)' : 'rgba(240,240,250,0.92)';
+  document.getElementById('search-input').style.background = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
+  document.getElementById('search-input').style.color      = isDark ? '#eef' : '#111';
+  document.body.style.color = clr;
+  // Update all text elements for day/night readability
+  const labels  = isDark ? '#7788aa' : '#445566';
+  const vals    = isDark ? '#eef'    : '#111122';
+  const subtext = isDark ? '#7788aa' : '#334455';
+  document.querySelectorAll('.wx-label').forEach(el => el.style.color = labels);
+  document.querySelectorAll('.wx-val').forEach(el => el.style.color = vals);
+  document.querySelectorAll('.wx-icon').forEach(el => el.style.color = vals);
+  document.querySelectorAll('.ctrl-lbl').forEach(el => el.style.color = subtext);
+  document.querySelectorAll('.ap-name').forEach(el => el.style.color = vals);
+  document.querySelectorAll('.ap-badge').forEach(el => el.style.color = subtext);
+  document.querySelectorAll('.pop-lbl').forEach(el => el.style.color = labels);
+  document.querySelectorAll('.pop-val').forEach(el => el.style.color = vals);
+  document.getElementById('clock').style.color    = isDark ? '#fff' : '#111';
+  document.querySelectorAll('#dot-popup h4').forEach(el => el.style.color = isDark ? '#fff' : '#111');
+  document.querySelectorAll('#dot-popup').forEach(el => el.style.color = isDark ? '#ccd' : '#223');
+  document.querySelectorAll('.pop-lbl').forEach(el => el.style.color = isDark ? '#7788aa' : '#445566');
+  document.querySelectorAll('.pop-val').forEach(el => el.style.color = isDark ? '#eef' : '#111122');
+  document.getElementById('date-lbl').style.color = subtext;
+  document.getElementById('pt-count').style.color = subtext;
+  document.querySelector('#hdr h1').style.color   = isDark ? '#fff' : '#111';
+  document.querySelector('#hdr .sub').style.color  = subtext;
+  document.querySelectorAll('.gl span').forEach(el => el.style.color = subtext);
+  document.querySelectorAll('#leg h3, #wx h3, #ap-panel h3').forEach(el => el.style.color = isDark ? '#dde' : '#223');
+}
+
+// ── Farm parcel boundary ──────────────────────────────────────────────────
+if (PARCELS && PARCELS.length > 0) {
+  const parcelLayer = L.geoJSON({type:'FeatureCollection', features:PARCELS}, {
+    style: {
+      color: '#ffdd44',
+      weight: 2.5,
+      opacity: 0.9,
+      fillColor: '#ffdd44',
+      fillOpacity: 0.08,
+      dashArray: null
+    },
+    onEachFeature(feature, layer) {
+      const p = feature.properties || {};
+      const addr  = (p.PREMSNUM||'') + ' ' + (p.PREMSNAM||'') + ' ' + (p.PREMSTYP||'') + ', ' + (p.PREMCITY||'');
+      const owner = p.OWNNAME1 || '';
+      const acres = p.ACRES ? parseFloat(p.ACRES).toFixed(1) + ' acres' : '';
+      const zone  = p.DESCLU ? p.DESCLU + ' (' + p.ZONING + ')' : '';
+      layer.bindTooltip(
+        `<b>${addr}</b><br>${owner}<br>${acres} · ${zone}`,
+        {sticky: true, className: 'parcel-tip'}
+      );
+    }
+  }).addTo(map);
+
+  // Glow effect — separate layer outside onEachFeature to avoid infinite recursion on iOS
+  L.geoJSON({type:'FeatureCollection', features:PARCELS}, {
+    style: {color:'#ffdd44', weight:6, opacity:0.15, fillOpacity:0}
+  }).addTo(map);
+
+  // Subtle pulse animation on the parcel
+  let pulseDir = 1, pulseVal = 0.08;
+  setInterval(() => {
+    pulseVal += pulseDir * 0.01;
+    if (pulseVal >= 0.18) pulseDir = -1;
+    if (pulseVal <= 0.04) pulseDir = 1;
+    parcelLayer.setStyle({fillOpacity: pulseVal});
+  }, 80);
+}
+
+// ── State — declared BEFORE canvas layer so draw() can reference them ─────
+// _curMin is minutes since META.start (the start of the 24 hours)
+var _curMin=1440, _winMin=8, playing=false, lastTs=null;
+var SPEEDS=[0.5,1,2,4,8,16,30,60,120,240];
+var speed=SPEEDS[4];  // index 4 = 8×
+
+// Airport colors — also declared before canvas layer
+var AP_COLORS = {
+  0: '64,180,255',   // KIAD - blue
+  1: '96,208,96',    // KDCA - green
+  2: '255,159,64',   // KBWI - orange
+  3: '204,136,255',  // KJYO - purple
+  4: '255,102,136',  // KGAI - pink
+  5: '255,221,68',   // KHEF - yellow
+  6: '68,221,204',   // KRMN - teal
+  7: '136,136,153',  // enroute - grey
+  8: '255,100,100',  // KADW - red
+  9: '100,200,140',  // KNYG - mint green
+};
+
+// ── Canvas overlay layer ──────────────────────────────────────────────────
+// live_24h.json arrives sorted by time, so we can binary-search efficiently
+
+const CanvasLayer = L.Layer.extend({
+  onAdd(map) {
+    this._map = map;
+    const pane = map.getPane('overlayPane');
+    this._canvas = document.createElement('canvas');
+    this._canvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;';
+    pane.appendChild(this._canvas);
+    this._ctx = this._canvas.getContext('2d');
+    map.on('moveend zoomend', this._reset, this);
+    this._reset();
+  },
+  onRemove(map) {
+    this._canvas.remove();
+    map.off('moveend zoomend', this._reset, this);
+  },
+  _reset() {
+    const size = this._map.getSize();
+    this._canvas.width  = size.x;
+    this._canvas.height = size.y;
+    const tl = this._map.containerPointToLayerPoint([0,0]);
+    L.DomUtil.setPosition(this._canvas, tl);
+    this.draw();
+  },
+  draw(lo, hi) {
+    if (typeof AP_COLORS === 'undefined') return;  // not ready yet
+    if (lo === undefined) { lo = _curMin - _winMin; hi = _curMin; }
+    // _curMin is UTC — use directly for data lookup
+    const ctx   = this._ctx;
+    const map   = this._map;
+    const w     = this._canvas.width;
+    const h     = this._canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    if (lo === undefined) return;
+
+    // Find points in time window using binary search
+    const pts = getPtsInRange(lo, hi);
+    if (!pts.length) return;
+
+    // Build density map: grid cell → count, for brightening overlapping paths
+    const GRID = 3; // pixels per cell
+    const density = new Map();
+    const projected = pts.map(p => {
+      const lp = map.latLngToContainerPoint([p[0], p[1]]);
+      const gx = Math.floor(lp.x / GRID);
+      const gy = Math.floor(lp.y / GRID);
+      const key = gx + ',' + gy;
+      density.set(key, (density.get(key) || 0) + 1);
+      return {x: lp.x, y: lp.y, t: p[3], ap: p[4], key, orig: p};
+    });
+
+    // Draw each point colored by airport
+    const range = hi - lo;
+    for (const p of projected) {
+      const age       = (hi - p.t) / range;
+      const matched   = !searchActive || matchesSearch(p.orig);
+      const baseAlpha = Math.max(0.08, 1 - age * 0.85);
+      const alpha     = matched ? baseAlpha : baseAlpha * 0.08;
+      const d         = density.get(p.key) || 1;
+      const extra     = Math.min(d - 1, 6);
+      const r         = matched ? (1 + extra * 0.5) * (searchActive ? 1.5 : 1) : 1;
+      const rgb       = AP_COLORS[p.ap] || '64,180,255';
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${rgb},${alpha.toFixed(2)})`;
+      ctx.fill();
+
+      if (matched && d > 2) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r + 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${rgb},${(alpha * 0.2).toFixed(2)})`;
+        ctx.fill();
+      }
+    }
+  }
+});
+
+// Binary search helpers
+function lowerBound(arr, val) {
+  let lo=0, hi=arr.length;
+  while(lo<hi) { const mid=(lo+hi)>>1; arr[mid][3]<val ? lo=mid+1 : hi=mid; }
+  return lo;
+}
+function isArrivalPt(p) {
+  // GA points — always show
+  if (p[5] === "GA" || p.length < 7) return true;
+  const alt      = p[8]  || 0;
+  const gs       = p[7]  || 0;
+  const track    = p[9]  || 0;
+  const baroRate = p[10] || 0;
+  // On or near ground — keep only if rolling out (fast enough)
+  if (alt < 200) return gs > 40;
+  // Have baro_rate — use it definitively
+  if (baroRate !== 0) {
+    // Climbing fast at jet speed above 500ft = departure
+    if (baroRate > 500 && gs > 180 && alt > 500) return false;
+    // Descending = arrival
+    if (baroRate < -200) return true;
+  }
+  // No baro_rate — use heading alignment against all runways
+  if (gs > 200 && alt > 500 && alt < 8000) {
+    const runways = [19,199,120,300, 19,199,150,330, 100,280,150,330,
+                     170,350, 140,320, 160,340, 150,330, 10,190, 20,200];
+    const bestAlign = Math.min(...runways.map(r => {
+      let d = Math.abs(track - r) % 360;
+      return d > 180 ? 360 - d : d;
+    }));
+    if (bestAlign > 60) return false;
+  }
+  return true;
+}
+
+function getPtsInRange(lo, hi) {
+  const a = lowerBound(ALL_PTS, lo);
+  const b = lowerBound(ALL_PTS, hi);
+  const slice = ALL_PTS.slice(a, b);
+  return slice.filter(p => activeAP.has(p[4]) && isArrivalPt(p));
+}
+
+const canvasLayer = new CanvasLayer();
+canvasLayer.addTo(map);
+
+// Redraw canvas when map moves
+map.on('moveend zoomend', () => canvasLayer.draw());
+
+// ── Click popup ───────────────────────────────────────────────────────────
+const AP_NAMES = {0:'KIAD',1:'KDCA',2:'KBWI',3:'KJYO',4:'KGAI',5:'KHEF',6:'KRMN',7:'En-route',8:'KADW',9:'KNYG'};
+const popup = document.getElementById('dot-popup');
+let popupVisible = false;
+
+map.on('click', function(e) {
+  if (playing) return;  // don't show popup while animating
+
+  const clickPt = map.latLngToContainerPoint(e.latlng);
+  const pts = getPtsInRange(_curMin - _winMin, _curMin);
+  if (!pts.length) return;
+
+  // Find nearest point to click within 20px
+  let best = null, bestDist = 20;
+  for (const p of pts) {
+    const pp = map.latLngToContainerPoint([p[0], p[1]]);
+    const d = Math.hypot(pp.x - clickPt.x, pp.y - clickPt.y);
+    if (d < bestDist) { bestDist = d; best = p; }
+  }
+
+  if (!best) {
+    popup.style.display = 'none';
+    popupVisible = false;
+    return;
+  }
+
+  // Point format:
+  // GA:         [lat, lon, intensity, time, ap_id, "GA"]
+  // Commercial: [lat, lon, intensity, time, ap_id, flight, ac_type, gs, alt, track, baro_rate]
+  const isGA    = best[5] === "GA" || best.length < 7;
+  const apName  = AP_NAMES[best[4]] || '—';
+  const timeStr = edtToDisplay(utcToEdt(best[3]));
+
+  if (isGA) {
+    document.getElementById('pop-title').textContent = 'General Aviation';
+    document.getElementById('pop-alt').textContent   = '—';
+    document.getElementById('pop-spd').textContent   = '—';
+  } else {
+    const flight  = best[5] || '—';
+    const acType  = best[6] || '—';
+    const gs      = best[7] ? best[7] + ' kt' : '—';
+    const alt     = best[8] ? best[8].toLocaleString() + ' ft' : '—';
+    const hdg      = best[9]  != null ? best[9] + '°' : '—';
+    const baro     = best[10] != null && best[10] !== 0
+                     ? (best[10] > 0 ? '↑' : '↓') + Math.abs(best[10]).toLocaleString() + ' fpm' : '';
+    document.getElementById('pop-title').textContent = flight + (acType ? '  ·  ' + acType : '');
+    document.getElementById('pop-alt').textContent   = alt + (baro ? '  ' + baro : '');
+    document.getElementById('pop-spd').textContent   = gs + (best[9] != null ? '  hdg ' + hdg : '');
+  }
+  document.getElementById('pop-ap').textContent   = apName;
+  document.getElementById('pop-time').textContent  = timeStr;
+
+  // Position popup near click but keep on screen
+  const mapDiv  = document.getElementById('map');
+  const mapRect = mapDiv.getBoundingClientRect();
+  let px = e.containerPoint.x + 14;
+  let py = e.containerPoint.y - 10;
+  if (px + 270 > mapRect.width)  px = e.containerPoint.x - 274;
+  if (py + 160 > mapRect.height) py = e.containerPoint.y - 164;
+  popup.style.left    = px + 'px';
+  popup.style.top     = (mapRect.top - mapDiv.offsetTop + py) + 'px';
+  popup.style.display = 'block';
+  popupVisible = true;
+});
+
+// Hide popup on map drag or double-click
+map.on('dragstart dblclick', () => {
+  popup.style.display = 'none';
+  popupVisible = false;
+});
+
+function toggleAP(id, code) {
+  if (activeAP.has(id)) {
+    activeAP.delete(id);
+    document.getElementById('tog-'+code).classList.add('off');
+  } else {
+    activeAP.add(id);
+    document.getElementById('tog-'+code).classList.remove('off');
+  }
+  redraw();
+}
+// Timeline minutes → real times. Names kept from the historical page;
+// America/New_York handles EDT and EST on its own.
+function utcToEdt(u) { return u; }
+function minToDate(m) { return new Date(((META ? META.start : 0) + m * 60) * 1000); }
+const FMT_TIME = new Intl.DateTimeFormat('en-US', {timeZone:'America/New_York', hour:'2-digit', minute:'2-digit'});
+const FMT_DAY  = new Intl.DateTimeFormat('en-US', {timeZone:'America/New_York', month:'short', day:'numeric'});
+const FMT_HOUR = new Intl.DateTimeFormat('en-US', {timeZone:'America/New_York', hour:'numeric', hourCycle:'h23'});
+function edtToDisplay(m) { const d = minToDate(m); return FMT_TIME.format(d) + ' ' + FMT_DAY.format(d); }
+function shortTime(m) { const d = minToDate(m); return FMT_TIME.format(d).replace(/^0/, '') + ' ' + FMT_DAY.format(d); }
+
+function period(m) {
+  const h = parseInt(FMT_HOUR.format(minToDate(m)), 10);
+  if(h<5)  return '🌙 Late Night';
+  if(h<9)  return '🌅 Early Morning';
+  if(h<12) return '☀️ Morning';
+  if(h<14) return '🌤 Midday';
+  if(h<18) return '☀️ Afternoon';
+  if(h<21) return '🌆 Evening';
+  return '🌙 Night';
+}
+
+// ── Weather ───────────────────────────────────────────────────────────────
+function updateWeather(edtMin) {
+  if (!WX.length) return;
+  // edtMin is already EDT minutes
+  let best = WX[0];
+  for (const obs of WX) { if (obs.t <= edtMin) best = obs; }
+  document.getElementById('wx-time').textContent = '@ ' + FMT_TIME.format(minToDate(best.t));
+  document.getElementById('wx-temp').textContent =
+    best.tmpf !== null ? best.tmpf+'°F' : '—';
+  let w = best.sknt > 0 ? best.compass+' '+best.sknt+' kt' : 'Calm';
+  if (best.gust) w += ' (gusts '+best.gust+' kt)';
+  document.getElementById('wx-wind').textContent = w;
+  document.getElementById('wind-arrow').style.transform = 'rotate('+best.drct+'deg)';
+  document.getElementById('wx-vsby').textContent = best.vsby !== null ? best.vsby+' mi' : '—';
+  document.getElementById('wx-sky').textContent = best.sky || '—';
+  if (best.wx) {
+    document.getElementById('wx-wx').textContent = best.wx;
+    document.getElementById('wx-wxrow').style.display = 'flex';
+  } else {
+    document.getElementById('wx-wxrow').style.display = 'none';
+  }
+}
+
+// ── Redraw ────────────────────────────────────────────────────────────────
+function redraw() {
+  canvasLayer.draw(_curMin - _winMin, _curMin);
+  // Convert UTC to EDT for display
+  const edtMin = utcToEdt(_curMin);
+  document.getElementById('clock').textContent = edtToDisplay(edtMin);
+  document.getElementById('period-lbl').textContent = period(edtMin);
+  // Data lookup uses UTC directly
+  const vis = getPtsInRange(_curMin - _winMin, _curMin);
+  document.getElementById('pt-count').textContent = vis.length.toLocaleString() + ' positions visible';
+  const sl = document.getElementById('timeline');
+  sl.value = _curMin;
+  const pct = (_curMin/SPAN*100).toFixed(1)+'%';
+  sl.style.background = 'linear-gradient(to right,#40b4ff 0%,#40b4ff '+pct+',#334 '+pct+',#334 100%)';
+  updateWeather(edtMin);
+}
+
+// ── Playback ──────────────────────────────────────────────────────────────
+function animate(ts) {
+  if (!playing) return;
+  if (lastTs !== null) {
+    _curMin += speed * ((ts - lastTs) / 1000);
+    if (_curMin > SPAN) _curMin = 0;
+    if (_curMin < 0) _curMin = SPAN;
+    redraw();
+  }
+  lastTs = ts;
+  requestAnimationFrame(animate);
+}
+
+function togglePlay() {
+  playing = !playing;
+  const b = document.getElementById('btn-play');
+  b.textContent = playing ? '⏸ Pause' : '▶ Play';
+  b.classList.toggle('active', playing);
+  if (playing) { stopPulse(); lastTs = null; requestAnimationFrame(animate); }
+}
+
+function jumpTo(m) { _curMin = Math.max(0, Math.min(SPAN, m)); redraw(); }
+function stepMin(d) { _curMin = Math.max(0, Math.min(SPAN, _curMin + d)); redraw(); }
+
+function updateSpeed() {
+  speed = SPEEDS[parseInt(document.getElementById('speed').value)-1];
+  document.getElementById('speed-val').textContent = speed < 1 ? '½×' : speed+'×';
+}
+function updateWindow() {
+  _winMin = parseInt(document.getElementById('winslider').value);
+  document.getElementById('win-val').textContent = _winMin+' min';
+  redraw();
+}
+
+document.getElementById('timeline').addEventListener('input', function() {
+  _curMin = parseInt(this.value); redraw();
+});
+
+// ── Live data ─────────────────────────────────────────────────────────────
+// The Pi force-pushes live_24h.json to the live-data branch every 15 minutes.
+// ?data=<url> reads another copy instead (for testing).
+const DATA_URL = new URLSearchParams(location.search).get('data') ||
+  'https://raw.githubusercontent.com/RDBFarm/iad-map/live-data/live_24h.json';
+const STALE_MIN = 45;
+
+async function loadData() {
+  let d;
+  try {
+    const r = await fetch(DATA_URL + (DATA_URL.includes('?') ? '&' : '?') + 't=' + Date.now());
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    d = await r.json();
+  } catch (e) {
+    document.getElementById('updated').textContent = META ? 'update failed, showing ' + shortTime(SPAN) : 'no data yet (' + e.message + ')';
+    return;
+  }
+  const atEdge = !META || _curMin >= SPAN - 1;
+  const shift = META ? (META.start - d.meta.start) / 60 : 0;
+  META = d.meta; ALL_PTS = d.pts; WX = d.wx || [];
+  SPAN = META.span_min;
+  _curMin = atEdge ? SPAN : Math.max(0, Math.min(SPAN, _curMin + shift));
+  document.getElementById('timeline').max = SPAN;
+  document.getElementById('tl-start').textContent = shortTime(0);
+  document.getElementById('tl-end').textContent = shortTime(SPAN);
+  document.getElementById('badge-pos').textContent = META.positions.toLocaleString() + ' positions';
+  document.getElementById('badge-ac').textContent = META.aircraft.toLocaleString() + ' aircraft';
+  const age = (Date.now() / 1000 - META.built) / 60;
+  const upd = document.getElementById('updated');
+  upd.textContent = 'updated ' + FMT_TIME.format(new Date(META.built * 1000)).replace(/^0/, '') +
+    (age > STALE_MIN ? ' — ' + Math.round(age / 60 * 10) / 10 + ' h ago, the Pi may be offline' : '');
+  upd.style.color = age > STALE_MIN ? '#ff9f40' : '';
+  if (searchActive) doSearch(document.getElementById('search-input').value); else redraw();
+}
+loadData();
+setInterval(loadData, 5 * 60 * 1000);
+
+// iOS Safari: invalidate map size when viewport changes (address bar show/hide)
+window.addEventListener('resize', () => { map.invalidateSize(); });
+window.visualViewport && window.visualViewport.addEventListener('resize', () => { map.invalidateSize(); });
+</script>
+</body>
+</html>
