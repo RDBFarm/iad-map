@@ -174,6 +174,9 @@
   #dot-popup .pop-row:last-child { border-bottom:none; }
   #dot-popup .pop-lbl { color:#7788aa; }
   #dot-popup .pop-val { color:#eef; font-weight:600; }
+  .leaflet-tooltip.ap-label { background:rgba(255,255,255,0.85); color:#111; border:none;
+    box-shadow:none; padding:0 4px; font-size:0.65rem; font-weight:600; }
+  .leaflet-tooltip.ap-label::before { display:none; }
 </style>
 </head>
 <body>
@@ -191,11 +194,11 @@
 <div id="map"></div>
 
 <div id="leg">
-  <h3>Density / Altitude</h3>
-  <div class="gb"></div>
-  <div class="gl"><span>Sparse/High</span><span>Dense/Low</span></div>
+  <h3>Altitude</h3>
+  <div class="gb" id="alt-ramp"></div>
+  <div class="gl"><span>Ground</span><span>7,500 ft</span><span>15,000 ft</span></div>
   <div style="margin-top:6px;line-height:1.7;color:#556;font-size:0.67rem">
-    Red = dense &amp; near ground<br>Blue = sparse / high alt
+    Viridis: brightest = lowest<br>Bigger dots = more traffic
   </div>
 </div>
 
@@ -212,44 +215,44 @@
 <div id="ap-panel">
   <h3>✈ Airport Filter</h3>
   <div class="ap-toggle active" id="tog-KIAD" onclick="toggleAP(0,'KIAD')">
-    <div class="ap-dot" style="background:#40b4ff"></div>
+    <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">KIAD — Dulles</span>
   </div>
   <div class="ap-toggle active" id="tog-KDCA" onclick="toggleAP(1,'KDCA')">
-    <div class="ap-dot" style="background:#60d060"></div>
+    <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">KDCA — Reagan Natl</span>
   </div>
   <div class="ap-toggle active" id="tog-KBWI" onclick="toggleAP(2,'KBWI')">
-    <div class="ap-dot" style="background:#ff9f40"></div>
+    <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">KBWI — BWI</span>
   </div>
   <div class="ap-toggle active" id="tog-KJYO" onclick="toggleAP(3,'KJYO')">
-    <div class="ap-dot" style="background:#cc88ff"></div>
+    <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">KJYO — Leesburg</span>
   </div>
   <div class="ap-toggle active" id="tog-KGAI" onclick="toggleAP(4,'KGAI')">
-    <div class="ap-dot" style="background:#ff6688"></div>
+    <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">KGAI — Gaithersburg</span>
   </div>
   <div class="ap-toggle active" id="tog-KHEF" onclick="toggleAP(5,'KHEF')">
-    <div class="ap-dot" style="background:#ffdd44"></div>
+    <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">KHEF — Manassas</span>
   </div>
   <div class="ap-toggle active" id="tog-KRMN" onclick="toggleAP(6,'KRMN')">
-    <div class="ap-dot" style="background:#44ddcc"></div>
+    <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">KRMN — Stafford</span>
   </div>
   <div class="ap-toggle active" id="tog-KADW" onclick="toggleAP(8,'KADW')">
-    <div class="ap-dot" style="background:#ff6464"></div>
+    <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">KADW — Andrews AFB</span>
   </div>
   <div class="ap-toggle active" id="tog-KNYG" onclick="toggleAP(9,'KNYG')">
-    <div class="ap-dot" style="background:#64c88c"></div>
+    <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">KNYG — Quantico MCAF</span>
   </div>
   <div class="divider"></div>
   <div class="ap-toggle active" id="tog-enroute" onclick="toggleAP(7,'enroute')">
-    <div class="ap-dot" style="background:#888899"></div>
+    <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">En-route / high alt</span>
   </div>
 </div>
@@ -347,11 +350,13 @@ const AP_MARKER_INFO = [
   [38.8108, -76.8674,   'KADW — Joint Base Andrews',   '#ff6464', 3],
   [38.5036, -77.3050,   'KNYG — Quantico MCAF',        '#64c88c', 3],
 ];
+// Neutral markers labelled by code: colour carries no meaning here.
 AP_MARKER_INFO.forEach(([lat, lon, label, color, radius]) => {
   L.circleMarker([lat, lon], {
-    radius, color, fillColor: color,
+    radius, color: '#000', fillColor: '#fff',
     fillOpacity: 1, weight: 1.5
-  }).addTo(map).bindTooltip(label, {direction:'top'});
+  }).addTo(map).bindTooltip(label.split(' ')[0], {permanent: true, direction: 'right',
+    offset: [6, 0], className: 'ap-label'});
 });
 
 // Subtle 50-mile radius ring around KIAD
@@ -632,16 +637,17 @@ function toggleMapStyle() {
   document.querySelector('#hdr .sub').style.color  = subtext;
   document.querySelectorAll('.gl span').forEach(el => el.style.color = subtext);
   document.querySelectorAll('#leg h3, #wx h3, #ap-panel h3').forEach(el => el.style.color = isDark ? '#dde' : '#223');
+  drawLegend(); redraw();
 }
 
 // ── Farm parcel boundary ──────────────────────────────────────────────────
 if (PARCELS && PARCELS.length > 0) {
   const parcelLayer = L.geoJSON({type:'FeatureCollection', features:PARCELS}, {
     style: {
-      color: '#ffdd44',
+      color: '#ffffff',
       weight: 2.5,
       opacity: 0.9,
-      fillColor: '#ffdd44',
+      fillColor: '#ffffff',
       fillOpacity: 0.08,
       dashArray: null
     },
@@ -660,8 +666,8 @@ if (PARCELS && PARCELS.length > 0) {
 
   // Glow effect — separate layer outside onEachFeature to avoid infinite recursion on iOS
   L.geoJSON({type:'FeatureCollection', features:PARCELS}, {
-    style: {color:'#ffdd44', weight:6, opacity:0.15, fillOpacity:0}
-  }).addTo(map);
+    style: {color:'#000000', weight:5, opacity:0.5, fillOpacity:0}
+  }).addTo(map).bringToBack();
 
   // Subtle pulse animation on the parcel
   let pulseDir = 1, pulseVal = 0.08;
@@ -679,7 +685,28 @@ var _curMin=1440, _winMin=8, playing=false, lastTs=null;
 var SPEEDS=[0.5,1,2,4,8,16,30,60,120,240];
 var speed=SPEEDS[4];  // index 4 = 8×
 
-// Airport colors — also declared before canvas layer
+// Altitude colour: viridis, lowest = brightest (yellow). Chosen for red-green
+// colour blindness; see CLAUDE.md. The ends that vanish into the base map
+// are left out: the darkest purples on the night map, the lightest yellows
+// on the day map.
+const VIRIDIS = [[68,1,84],[72,40,120],[62,74,137],[49,104,142],[38,130,142],
+                 [31,158,137],[53,183,121],[109,205,89],[180,222,44],[253,231,37]];
+function viridis(x) {
+  x = Math.max(0, Math.min(1, x)) * (VIRIDIS.length - 1);
+  const i = Math.min(Math.floor(x), VIRIDIS.length - 2), f = x - i;
+  return VIRIDIS[i].map((c, k) => Math.round(c + (VIRIDIS[i + 1][k] - c) * f)).join(',');
+}
+function altColor(altFt) {
+  const low = 1 - Math.max(0, Math.min(15000, altFt || 0)) / 15000;   // 1 at ground
+  return isDark ? viridis(0.25 + low * 0.75) : viridis(low * 0.85);
+}
+function drawLegend() {
+  const stops = [];
+  for (let i = 0; i <= 10; i++) stops.push('rgb(' + altColor(i * 1500) + ') ' + (i * 10) + '%');
+  document.getElementById('alt-ramp').style.background = 'linear-gradient(to right,' + stops.join(',') + ')';
+}
+
+// Airport colors — kept only for reference; dots are coloured by altitude
 var AP_COLORS = {
   0: '64,180,255',   // KIAD - blue
   1: '96,208,96',    // KDCA - green
@@ -756,12 +783,17 @@ const CanvasLayer = L.Layer.extend({
       const d         = density.get(p.key) || 1;
       const extra     = Math.min(d - 1, 6);
       const r         = matched ? (1 + extra * 0.5) * (searchActive ? 1.5 : 1) : 1;
-      const rgb       = AP_COLORS[p.ap] || '64,180,255';
+      const rgb       = altColor(p.orig[8]);
 
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fillStyle = `rgba(${rgb},${alpha.toFixed(2)})`;
       ctx.fill();
+      if (!isDark && matched) {   // a hairline so light dots hold up on the day map
+        ctx.strokeStyle = `rgba(0,0,0,${(alpha * 0.5).toFixed(2)})`;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
 
       if (matched && d > 2) {
         ctx.beginPath();
@@ -1066,6 +1098,7 @@ async function loadData() {
   upd.style.color = age > STALE_MIN ? '#ff9f40' : '';
   if (searchActive) doSearch(document.getElementById('search-input').value); else redraw();
 }
+drawLegend();
 loadData();
 setInterval(loadData, 5 * 60 * 1000);
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Publish the last 24 hours of recorded positions to GitHub.
 
-Run every 15 minutes by iad-map-publish.timer. Reads the collector's hourly
-files and writes, on the `live-data` branch of RDBFarm/iad-map:
+Run every 15 minutes by iad-map-publish.timer. Reads the collector's log
+(flights.db), keeps what the map shows -- positions within 50 statute miles
+of Dulles at or below 15,000 ft -- and writes, on the `live-data` branch of RDBFarm/iad-map:
 
   live.json        what live.html reads first: the window, counts, KIAD
                    weather, and the list of hour files with a hash of each
@@ -17,10 +18,10 @@ fetches from raw.githubusercontent.com, so GitHub Pages is not rebuilt.
   python3 publish.py            build and push
   python3 publish.py --no-push  build only, and print a summary
 """
-import hashlib, json, math, os, subprocess, sys, time, urllib.request
+import hashlib, json, math, os, re, sqlite3, subprocess, sys, time, urllib.request
 
-POINTS_DIR = os.environ.get("IADMAP_POINTS_DIR", "/var/lib/iad-map/points")
-WORK_DIR = os.environ.get("IADMAP_PUBLISH_DIR", "/var/lib/iad-map/publish")
+DB_PATH = os.environ.get("IADMAP_DB", "/mnt/flightdata/iad-map/flights.db")
+WORK_DIR = os.environ.get("IADMAP_PUBLISH_DIR", "/mnt/flightdata/iad-map/publish")
 DEPLOY_KEY = os.environ.get("IADMAP_DEPLOY_KEY", "/var/lib/iad-map/deploy_key")
 REMOTE = os.environ.get("IADMAP_REMOTE", "git@github.com:RDBFarm/iad-map.git")
 BRANCH = "live-data"
@@ -31,20 +32,26 @@ SPAN_S = 24 * 3600
 
 # Airport ids as live.html numbers them; 7 is en-route.
 # A position is labelled with the nearest airport when it is within that
-# airport's radius and below its ceiling. These thresholds are this script's
-# own rule, chosen to resemble the historical map; they are not an FAA
-# definition of an arrival.
-AIRPORTS = [  # (id, lat, lon, radius_nm, ceiling_ft)
-    (0, 38.9444, -77.4558, 15, 10000),  # KIAD
-    (1, 38.8521, -77.0377, 15, 10000),  # KDCA
-    (2, 39.1754, -76.6683, 15, 10000),  # KBWI
-    (3, 39.0779, -77.5578, 5, 3000),    # KJYO
-    (4, 39.1683, -77.1660, 5, 3000),    # KGAI
-    (5, 38.7214, -77.5153, 5, 3000),    # KHEF
-    (6, 38.5997, -77.4542, 5, 3000),    # KRMN
-    (8, 38.8108, -76.8674, 12, 8000),   # KADW
-    (9, 38.5036, -77.3050, 5, 3000),    # KNYG
+# airport's radius and below its ceiling, except that an airline callsign is
+# never given a GA-only field. The radii and ceilings are this script's own
+# rule, chosen to resemble the historical map; they are not the classifier in
+# render_github.py, which isn't in this repository.
+AIRPORTS = [  # (id, lat, lon, radius_nm, ceiling_ft, ga_only)
+    (0, 38.9444, -77.4558, 15, 10000, False),  # KIAD
+    (1, 38.8521, -77.0377, 15, 10000, False),  # KDCA
+    (2, 39.1754, -76.6683, 15, 10000, False),  # KBWI
+    (3, 39.0779, -77.5578, 5, 3000, True),     # KJYO
+    (4, 39.1683, -77.1660, 5, 3000, True),     # KGAI
+    (5, 38.7214, -77.5153, 5, 3000, True),     # KHEF
+    (6, 38.5997, -77.4542, 5, 3000, True),     # KRMN
+    (8, 38.8108, -76.8674, 12, 8000, False),   # KADW
+    (9, 38.5036, -77.3050, 5, 3000, False),    # KNYG
 ]
+# Three letters then a digit: the ICAO airline-callsign shape (UAL123, JIA5675).
+# Some military callsigns share it (PAT13); they are kept off GA-only fields too.
+AIRLINE_CALLSIGN = re.compile(r"^[A-Z]{3}[0-9]")
+CENTER = (38.9444, -77.4558)
+RADIUS_NM = 43.45  # 50 statute miles
 MAX_ALT_FT = 15000
 
 
@@ -55,9 +62,12 @@ def dist_nm(lat1, lon1, lat2, lon2):
     return 3440.065 * 2 * math.asin(math.sqrt(a))
 
 
-def airport_for(lat, lon, alt):
+def airport_for(lat, lon, alt, flight):
+    airline = bool(AIRLINE_CALLSIGN.match(flight or ""))
     best, best_d = 7, None
-    for ap, alat, alon, radius, ceiling in AIRPORTS:
+    for ap, alat, alon, radius, ceiling, ga_only in AIRPORTS:
+        if ga_only and airline:
+            continue
         d = dist_nm(lat, lon, alat, alon)
         if d <= radius and alt < ceiling and (best_d is None or d < best_d):
             best, best_d = ap, d
@@ -65,21 +75,34 @@ def airport_for(lat, lon, alt):
 
 
 def load_points(start, end):
-    rows = []
-    if not os.path.isdir(POINTS_DIR):
-        return rows
-    first = time.strftime("%Y%m%d%H", time.gmtime(start))
-    for name in sorted(os.listdir(POINTS_DIR)):
-        if not name.endswith(".jsonl") or name[:-6] < first:
+    """Map positions from the log, as
+    [t, hex, lat, lon, alt, gs, track, vrate, flight, type, mlat], one per
+    distinct position (an aircraft's other messages repeat its last one)."""
+    if not os.path.exists(DB_PATH):
+        return []
+    lat_pad = RADIUS_NM / 60
+    lon_pad = lat_pad / math.cos(math.radians(CENTER[0]))
+    db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=60)
+    cur = db.execute("""
+        SELECT pos_t, hex, lat, lon, CASE WHEN on_ground = 1 THEN 0 ELSE alt_baro END,
+               gs, track, COALESCE(baro_rate, geom_rate), flight, type, mlat
+        FROM positions
+        WHERE t BETWEEN ? AND ? AND pos_t BETWEEN ? AND ?
+          AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
+          AND (on_ground = 1 OR alt_baro <= ?)""",
+        (start, end + 60, start, end,
+         CENTER[0] - lat_pad, CENTER[0] + lat_pad, CENTER[1] - lon_pad, CENTER[1] + lon_pad,
+         MAX_ALT_FT))
+    rows, seen = [], set()
+    for t, hexid, lat, lon, alt, gs, track, vrate, flight, actype, mlat in cur:
+        key = (hexid, t)
+        if key in seen or dist_nm(lat, lon, *CENTER) > RADIUS_NM:
             continue
-        with open(os.path.join(POINTS_DIR, name)) as f:
-            for line in f:
-                try:
-                    r = json.loads(line)
-                except ValueError:
-                    continue  # a line cut short by a power loss
-                if start <= r[0] <= end:
-                    rows.append(r)
+        seen.add(key)
+        rows.append([int(t), hexid, round(lat, 5), round(lon, 5), int(alt),
+                     None if gs is None else round(gs), None if track is None else round(track),
+                     vrate, flight or "", actype or "", mlat])
+    db.close()
     return rows
 
 
@@ -138,7 +161,7 @@ def hour_chunk(rows, hour_start):
         if key not in ac_index:
             ac_index[key] = len(ac)
             ac.append([hexid, flight, actype])
-        pts.append([lat, lon, alt, t - hour_start, airport_for(lat, lon, alt),
+        pts.append([lat, lon, alt, t - hour_start, airport_for(lat, lon, alt, flight),
                     ac_index[key], gs, track, vrate])
     return {"start": hour_start, "ac": ac, "pts": pts}
 
