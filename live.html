@@ -1197,7 +1197,9 @@ function eventItems(ev) {
     const who = [e.a, e.b].map(x => x.flight || x.hex.toUpperCase()).join(' / ');
     items.push({kind: 'close', t: e.cpa_t, lat: (e.a.lat + e.b.lat) / 2, lon: (e.a.lon + e.b.lon) / 2,
       label: 'Close: ' + who,
-      detail: 'Close approach ' + e.h_nm + ' nm, ' + e.v_ft + ' ft' + (f.includes('mlat') ? ' (MLAT position)' : '')});
+      detail: 'Close approach ' + e.h_nm + ' nm, ' + e.v_ft + ' ft' +
+        (e.closing_kt != null ? ' at ' + e.closing_kt + ' kt relative (limit ' + e.limit_nm + ' nm)' : '') +
+        (f.includes('mlat') ? ' (MLAT position)' : '')});
   });
   (ev.farm_passes || []).forEach(p => {
     if (p.prop === true || !(p.alt < LOW_HIGHLIGHT_FT)) return;

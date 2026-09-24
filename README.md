@@ -31,8 +31,9 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
   an issue mentioning @RDBFarm, which the GitHub app turns into a phone
   notification. Medical and minimum-fuel statuses are logged, not pushed.
 - `proximity.py`, run by `publish.py`, logs close approaches at any range to
-  `events/close_approaches.jsonl`: two airborne aircraft under 1 nm apart and
-  under 500 ft vertically, with flags for airport traffic, formation,
+  `events/close_approaches.jsonl`: two airborne aircraft under 500 ft apart
+  vertically and closer than the distance they'd cover towards each other in
+  10 seconds at their relative speed (0.15 nm floor, 1 nm cap), with flags for airport traffic, formation,
   low-level and MLAT. They are close approaches, not confirmed near misses.
   TCAS resolution advisories, if this readsb reports them, go to
   `events/tcas.jsonl`. The live map marks emergencies, TCAS advisories and
