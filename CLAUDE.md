@@ -8,6 +8,63 @@ than assuming.
 
 ---
 
+## 0. Start here — status as of 2026-09-24
+
+**Everything below is installed and running on the Pi** (installed 09-24,
+~10:30 AM ET). Live map: **https://rdbfarm.github.io/iad-map/live.html**.
+
+- **Running on the Pi** (systemd): `iad-map-collector` (logs every 2 s),
+  `iad-map-alerts` (emergencies + low passes → phone), `iad-map-publish.timer`
+  (every 15 min → `live-data` branch), `iad-map-aircraft-db.timer` (monthly).
+- **Verified live on 09-24:** first upload 10:30 AM; weather parses (29 KIAD
+  reports); aircraft types come through via the lookup (209/209); the test
+  alert reached his phone (issues #10–12, closed); full-path files arrive
+  (6 hours: 2,296 aircraft, 2.7 MB compressed, ~0.5 MB per hour).
+- **Not yet checked on the real Pi:** drive growth per day (estimate ~1 GB),
+  `publish.py` memory on the 2 GB Pi (measured ~490 MB in the sandbox), the
+  live map on his iPad, whether readsb reports TCAS advisories (`acas_ra`).
+- **Open:** close-approach thresholds (tune after a week of real traffic),
+  runway headings in the classifier (magnetic vs true), live map panels
+  overlapping at phone width.
+
+### How to change something on the Pi
+All Pi code is in `pi/` on `main`. Merge the change, then have him run on
+the Pi (SSH from the Mac Terminal or Termius on the iPad, **on the farm
+network**), as **two separate lines** — a one-line `curl … | sudo bash` lost
+its pipe when pasted from the iPad:
+
+```
+curl -fsSL https://raw.githubusercontent.com/RDBFarm/iad-map/main/pi/install.sh -o install.sh
+sudo bash install.sh
+```
+
+The installer is safe to re-run: it keeps the log, events, key and lookup,
+replaces the programs, and restarts running services. It prints the deploy
+key again at the end; ignore it unless the key changed. Changes to
+`live.html` need nothing on the Pi (Pages publishes a minute or two after
+merge).
+
+### Health check (one line on the Pi)
+```
+systemctl is-active iad-map-collector iad-map-alerts iad-map-publish.timer; df -h /mnt/flightdata | tail -1; ls -la /mnt/flightdata/iad-map/flights.db; journalctl -u iad-map-publish -n 5 --no-pager
+```
+From a cloud session, the published data can be read directly:
+`https://raw.githubusercontent.com/RDBFarm/iad-map/live-data/live.json`
+(counts, weather, events, farm passes, hour-file and track-file lists).
+The Pi itself can't be reached from outside the farm.
+
+### Things that cost time on 09-23/24
+- The deploy key was first added to **rdbf-app** instead of iad-map, giving
+  "Permission … denied to deploy key". It lives on **iad-map** only; it must
+  never be on rdbf-app (the farm records repo).
+- GitHub notifications took a minute or two; he has **working hours** set, so
+  night-time alerts arrive silently in the GitHub inbox. Direct Mentions on.
+- A credential can't be tested from a cloud session (§5).
+- Positions near DCA below ~2,000 ft fade out: reception limit ~35 mi from
+  the farm, not a bug (AAL1623, 09-24).
+
+---
+
 ## 1. Who you're working with
 
 - **Guillaume** (GitHub: `rdbfarm`) runs Red Devil Bison Farm in Poolesville, MD. Hobbyist Python, **not a developer, not terminal-savvy**.
@@ -52,10 +109,9 @@ the live map.
 
 ## 3. Farm receiver (Raspberry Pi) — current state
 
-**Status: receiving (Sept 23, 2026). The logger and publisher in `pi/` are
-built and merged but NOT YET INSTALLED** — installing needs him on the farm
-network. First result from the receiver: 291 aircraft (271 with position),
-~1,683 messages/sec.
+**Status: receiving since Sept 23, 2026; the `pi/` logger, publisher and
+alerts installed and running since 09-24** (see §0). First result from the
+receiver: 291 aircraft (271 with position), ~1,683 messages/sec.
 
 ### Hardware (as actually installed)
 - Raspberry Pi 4B 2GB, aluminum heatsink case, official-spec 5.1V 3A USB-C supply
@@ -100,7 +156,7 @@ network. First result from the receiver: 291 aircraft (271 with position),
 
 ---
 
-## 4. Live map pipeline (built 09-23/24, not yet installed)
+## 4. Live map pipeline (built 09-23/24, installed 09-24)
 
 See `README.md` for how to install. In short:
 
@@ -125,15 +181,16 @@ See `README.md` for how to install. In short:
 - **Runway headings** in the copied classifier are runway numbers (magnetic); ADS-B track is true. KIAD listed as 19/199. Check with real traffic.
 
 ### After installing, check
-- Drive growth per day, publisher memory on the Pi, whether aircraft types come through, whether the aviationweather.gov weather feed parses (untested — sandbox couldn't reach it), and `live.html` on the iPad.
+- Done 09-24: aircraft types come through (via the lookup); the aviationweather.gov weather feed parses.
+- Still to check: drive growth per day, publisher memory on the Pi, `live.html` on the iPad (see §0).
 
-### Emergencies and close approaches (built 09-24, not yet installed)
+### Emergencies and close approaches (built and installed 09-24)
 - **Emergencies (7500/7600/7700) push to his phone** — his choice (09-24): text or GitHub; just him; everything the receiver hears. Built as `pi/alerts.py` → alert file on the `alerts` branch (deploy key) → `.github/workflows/emergency-alert.yml` opens an issue as github-actions[bot] mentioning @RDBFarm. Not with his own token: GitHub doesn't notify you about your own actions. Needs 3 consecutive reads (~6 s). Medical/min-fuel statuses logged only. Test with `alerts.py --test` after install; he needs the GitHub app with notifications on.
 - **Near misses: a log plus map highlights, no push** (his choice, 09-24). `pi/proximity.py`: under 500 ft vertically and closer than **10 s at their relative speed**, kept between 0.15 and 1.0 nm (his request, 09-24: "a slow near miss has a much smaller radius than a fast one"); both airborne; flags near_airport / low / persistent / mlat / tcas. Thresholds are first guesses — tune after real traffic. The first live event (09-24, two AVL-callsign light aircraft passing 0.85 nm apart at ~200 kt relative, 21 nm WNW of the farm) prompted the speed scaling; under it that pass is not logged. Relative speed, not range rate: range rate is zero at every closest point. Call them close approaches, never near misses, unless a TCAS advisory confirms.
 - Whether this readsb reports TCAS advisories (`acas_ra`) is unconfirmed.
 - At phone width the live map's panels overlap (inherited layout, worse with the Events list). Not fixed.
 
-### Over the farm (built 09-24, not yet installed)
+### Over the farm (built and installed 09-24)
 - His request (09-24): an over-the-farm figure on the live map, highlight passes **under 2,000 ft**, push to phone **under 1,500 ft**, and **exclude prop planes**.
 - `pi/farm.py`: within **1 nm** of the parcel centre (39.1506, -77.4612), any altitude, airborne; one log line per pass with its closest point. Altitudes are reported pressure altitude, not height above the farm.
 - "Prop plane" = my reading, not confirmed by him: fixed-wing (L/S/A/G) with piston, turboprop or electric engines per ICAO Doc 8643 descriptors (`pi/aircraft_types.json`, from tar1090-db). Helicopters and jets stay in. **Unknown types: logged and shown on the map, never pushed** (his call, 09-24). Types come from `aircraft_lookup.py`, since readsb supplies none.
@@ -173,6 +230,6 @@ Kept for reference only; not to be fixed or rebuilt.
 ## 7. Where things live
 
 - Repo: `rdbfarm/iad-map` (GitHub Pages). Live map: `live.html`. Historical map: `iad_map_github.html`.
-- Pi code: `pi/` (installed to `/opt/iad-map`). Log: `/mnt/flightdata/iad-map/flights.db`. Deploy key: `/var/lib/iad-map/deploy_key`.
-- Live data: `live-data` branch (machine-written; do not edit).
+- Pi code: `pi/` (installed to `/opt/iad-map`, run as system user `iadmap`). Log: `/mnt/flightdata/iad-map/flights.db`. Type lookup: `/mnt/flightdata/iad-map/aircraft.db`. Events: `/mnt/flightdata/iad-map/events/*.jsonl` (emergencies, low_passes, close_approaches, tcas, farm_passes; never pruned). Deploy key: `/var/lib/iad-map/deploy_key` (added to **iad-map** as "Stables Pi", read/write).
+- Branches written by the Pi (machine-written; do not edit): `live-data` (map data, one amended commit), `alerts` (one commit per alert; the workflow on it opens the issues).
 - Pi live JSON: `/run/readsb/aircraft.json`
