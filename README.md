@@ -40,18 +40,13 @@ written for points about 10 s apart, so it is applied to each aircraft's
 points thinned to 10 s; every logged point inside a flagged climb is dropped,
 and nothing else is thinned.
 
-Issues found in that code on 2026-09-24, copied as they are and not yet fixed
-(each needs the owner's go-ahead):
+Issues found in that copied code on 2026-09-24, not yet fixed in
+`publish.py` (each needs the owner's go-ahead):
 
-- `KEEP_EVERY_N = 2` in render_github.py drops every other cache row by file
-  position. (Not copied: the live map keeps every point.)
-- The GA test used for the map's points treats *any* callsign starting with
-  "N" as GA, while `classify_airport()` requires N followed by a digit.
+- The GA flag treats *any* callsign starting with "N" as GA, while
+  `classify_airport()` requires N followed by a digit. On May 1, 2025 this
+  caught 36 airline callsigns, mostly Spirit (NKS).
 - `AIRLINE_AIRPORT` has two-letter keys (WN, VV, VM, MX) that can never
   match, since the code compares three letters.
 - Runway headings are runway numbers (magnetic); ADS-B track is true north.
   KIAD is listed as 19/199. Not yet checked against published true bearings.
-- render_github.py turns off HTTPS certificate checks for all its downloads.
-- On the May 1 map, the weather request covers May 1 local time only, so
-  8 PM to midnight on Apr 30 shows the 12:52 AM May 1 report; and the
-  "5,800 aircraft" badge is typed in, not counted.
