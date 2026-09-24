@@ -44,7 +44,8 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
   highlights passes under 2,000 ft; `alerts.py` pushes passes under 1,500 ft
   to the phone. Propeller aeroplanes (piston, turboprop or electric
   fixed-wing, by ICAO type in `aircraft_types.json`, from tar1090-db) are left
-  out of all three; helicopters, jets and unknown types stay in.
+  out of all three. Helicopters and jets are in. Unknown types are counted
+  and shown, marked, but not pushed.
 
 - `aircraft_lookup.py` supplies aircraft types, which readsb on this image
   doesn't: it looks each ICAO address up in tar1090's aircraft database,

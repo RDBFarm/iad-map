@@ -18,10 +18,12 @@ single garbled message doesn't raise an alarm. Then, once per episode:
     (An issue opened with the owner's own token would not notify him:
     GitHub doesn't notify you about your own actions.)
 
-Also pushed: any aircraft within 1 nm of the farm below 1,500 ft (reported
-pressure altitude), seen on 2 reads in a row, except propeller aeroplanes
-(farm.py decides; unknown types are pushed). Once per aircraft per 10
-minutes; logged to events/low_passes.jsonl. Owner's request, 2026-09-24.
+Also: any aircraft within 1 nm of the farm below 1,500 ft (reported
+pressure altitude), seen on 2 reads in a row, is logged to
+events/low_passes.jsonl, once per aircraft per 10 minutes -- unless it is a
+propeller aeroplane. It is pushed only when its type is known and is not a
+prop plane (jets, helicopters); an unknown type is logged, not pushed.
+Owner's decisions, 2026-09-24. farm.py decides what is a prop plane.
 
 Other ADS-B emergency statuses (lifeguard, minfuel, downed, reserved) are
 logged but not pushed; the owner asked for the three squawks only. An episode
@@ -99,7 +101,7 @@ def dist_bearing(lat1, lon1, lat2, lon2):
 
 def compose_low_pass(ev):
     who = ev.get("flight") or ev["hex"].upper()
-    kind = {False: "", None: " (type unknown)"}.get(ev.get("prop"), "")
+    kind = ""
     title = f"✈ Low over the farm: {who}" + (f" ({ev['type']})" if ev.get("type") else "") + f" at {ev['alt']:,} ft"
     body = "\n".join([
         f"@RDBFarm — {who}{kind} was {ev['dist_nm']} nm from the centre of the farm, and inside 1 nm, at {ev['utc']} UTC.",
@@ -114,7 +116,8 @@ def compose_low_pass(ev):
         "[Live map](https://rdbfarm.github.io/iad-map/live.html)",
         "",
         f"_Automatic alert from `pi/alerts.py`: within {farm.FARM_RADIUS_NM} nm of the farm below "
-        f"{LOW_PASS_FT:,} ft on {LOW_PASS_READS} reads in a row. Propeller aeroplanes are not alerted._"])
+        f"{LOW_PASS_FT:,} ft on {LOW_PASS_READS} reads in a row. Only known non-prop types (jets, "
+        "helicopters) are alerted; unknown types are logged._"])
     return title, body
 
 
@@ -249,13 +252,16 @@ def watch():
                 if low_streak[h] == LOW_PASS_READS and now - low_last.get(h, 0) > LOW_PASS_REPEAT_S:
                     low_last[h] = now
                     ev = low_pass_event(ac, now)
+                    ev["pushed"] = ev["prop"] is False   # unknown type: log only
                     append_event(ev, "low_passes.jsonl")
-                    print("alerts: low pass", ev["hex"], ev.get("flight"), ev["alt"], flush=True)
-                    try:
-                        queue_alert(ev)
-                        pending = True
-                    except (OSError, subprocess.SubprocessError) as e:
-                        print("alerts: could not queue alert:", e, flush=True)
+                    print("alerts: low pass", ev["hex"], ev.get("flight"), ev["alt"],
+                          "pushed" if ev["pushed"] else "logged (type unknown)", flush=True)
+                    if ev["pushed"]:
+                        try:
+                            queue_alert(ev)
+                            pending = True
+                        except (OSError, subprocess.SubprocessError) as e:
+                            print("alerts: could not queue alert:", e, flush=True)
             status = ac.get("emergency")
             code = ac.get("squawk") if ac.get("squawk") in SQUAWKS else PUSH_STATUS.get(status)
             if code is None and status in LOG_ONLY_STATUS:
