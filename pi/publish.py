@@ -20,8 +20,11 @@ fetches from raw.githubusercontent.com, so GitHub Pages is not rebuilt.
 """
 import hashlib, json, math, os, sqlite3, subprocess, sys, time, urllib.request
 
+import proximity
+
 DB_PATH = os.environ.get("IADMAP_DB", "/mnt/flightdata/iad-map/flights.db")
 WORK_DIR = os.environ.get("IADMAP_PUBLISH_DIR", "/mnt/flightdata/iad-map/publish")
+EVENTS_DIR = os.environ.get("IADMAP_EVENTS_DIR", "/mnt/flightdata/iad-map/events")
 DEPLOY_KEY = os.environ.get("IADMAP_DEPLOY_KEY", "/var/lib/iad-map/deploy_key")
 REMOTE = os.environ.get("IADMAP_REMOTE", "git@github.com:RDBFarm/iad-map.git")
 BRANCH = "live-data"
@@ -454,6 +457,13 @@ def build(now):
             "receiver": "Red Devil Bison Farm, Poolesville MD",
         },
         "wx": fetch_weather(start),
+        # Events at any range, for highlighting: emergencies from alerts.py,
+        # close approaches and TCAS advisories from proximity.py.
+        "events": {
+            "emergencies": proximity.recent(EVENTS_DIR, "emergencies.jsonl", start),
+            "close_approaches": proximity.recent(EVENTS_DIR, "close_approaches.jsonl", start),
+            "tcas": proximity.recent(EVENTS_DIR, "tcas.jsonl", start),
+        },
         "chunks": chunks,
     }
     return index, files
@@ -517,6 +527,12 @@ def push(index, files):
 
 
 def main():
+    if os.path.exists(DB_PATH):
+        try:
+            n = proximity.update(DB_PATH, EVENTS_DIR)
+            print(f"publish: {n} close approaches logged", flush=True)
+        except Exception as e:  # never let this stop the map
+            print("publish: close-approach check failed:", e, flush=True)
     index, files = build(time.time())
     m = index["meta"]
     print(f"publish: {m['positions']} positions, {m['aircraft']} aircraft, "

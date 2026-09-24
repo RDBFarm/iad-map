@@ -158,6 +158,13 @@
     color:#556; cursor:pointer; font-size:0.9rem; display:none;
   }
   #search-wrap { position:relative; }
+  #events h3 { margin-top:10px; }
+  #events-note { color:#7788aa; font-size:0.65rem; margin-top:3px; }
+  /* event markers: shape and text carry the meaning, not colour */
+  .ev-icon div { background:#fff; color:#111; border:1.5px solid #111; border-radius:4px;
+    padding:1px 5px; font-size:0.66rem; font-weight:700; white-space:nowrap;
+    box-shadow:0 0 0 1.5px rgba(255,255,255,0.8); }
+  .ev-icon.ev-emergency div { border-width:2.5px; font-size:0.72rem; }
   #search-count { font-size:0.65rem; color:#556; margin-top:4px; }
 
   /* click popup */
@@ -210,6 +217,11 @@
   </div>
   <div id="search-count"></div>
   <div id="search-results"></div>
+  <div id="events">
+    <h3>⚠ Events, last 24 h</h3>
+    <div id="events-list" style="max-height:160px;overflow-y:auto"></div>
+    <div id="events-note"></div>
+  </div>
 </div>
 
 <div id="ap-panel">
@@ -1137,9 +1149,75 @@ async function loadData() {
   upd.textContent = 'updated ' + FMT_TIME.format(new Date(META.built * 1000)).replace(/^0/, '') +
     (age > STALE_MIN ? ' — ' + Math.round(age / 60 * 10) / 10 + ' h ago, the Pi may be offline' : '');
   upd.style.color = age > STALE_MIN ? '#ff9f40' : '';
+  drawEvents(idx.events);
   if (searchActive) doSearch(document.getElementById('search-input').value); else redraw();
 }
 drawLegend();
+// ── Events: emergencies, TCAS advisories, close approaches ─────────────────
+// From the Pi (alerts.py, proximity.py), at any range. Close approaches
+// flagged as airport traffic, formation or low-level are listed as a count
+// only; see pi/proximity.py for what the flags mean.
+const eventLayer = L.layerGroup().addTo(map);
+const EV_SYMBOL = {emergency: '▲', tcas: '◆', close: '◇'};
+
+function eventItems(ev) {
+  const items = [];
+  (ev.emergencies || []).filter(e => e.pushed).forEach(e => items.push({
+    kind: 'emergency', t: e.t, lat: e.lat, lon: e.lon,
+    label: e.code + ' ' + (e.flight || e.hex.toUpperCase()),
+    detail: e.code + (e.code === '7700' ? ' emergency' : e.code === '7600' ? ' radio failure' : ' unlawful interference')}));
+  (ev.tcas || []).forEach(e => items.push({
+    kind: 'tcas', t: e.t, lat: e.lat, lon: e.lon,
+    label: 'TCAS ' + (e.flight || e.hex.toUpperCase()), detail: 'TCAS resolution advisory'}));
+  let hidden = 0;
+  (ev.close_approaches || []).forEach(e => {
+    const f = e.flags || [];
+    if (!f.includes('tcas') && (f.includes('near_airport') || f.includes('persistent') || f.includes('low'))) { hidden++; return; }
+    const who = [e.a, e.b].map(x => x.flight || x.hex.toUpperCase()).join(' / ');
+    items.push({kind: 'close', t: e.cpa_t, lat: (e.a.lat + e.b.lat) / 2, lon: (e.a.lon + e.b.lon) / 2,
+      label: 'Close: ' + who,
+      detail: 'Close approach ' + e.h_nm + ' nm, ' + e.v_ft + ' ft' + (f.includes('mlat') ? ' (MLAT position)' : '')});
+  });
+  items.sort((a, b) => b.t - a.t);
+  return {items, hidden};
+}
+
+function jumpToEvent(it) {
+  if (playing) togglePlay();
+  _curMin = Math.max(0, Math.min(SPAN, (it.t - META.start) / 60 + 1));
+  redraw();
+  if (it.lat != null) {
+    map.setView([it.lat, it.lon], Math.max(map.getZoom(), 10));
+    pulsePos = {lat: it.lat, lon: it.lon};
+    startPulse();
+  }
+}
+
+function drawEvents(ev) {
+  eventLayer.clearLayers();
+  const {items, hidden} = eventItems(ev || {});
+  const list = document.getElementById('events-list');
+  list.innerHTML = '';
+  items.forEach(it => {
+    const row = document.createElement('div');
+    row.className = 'search-result';
+    row.innerHTML = `<span><span class="sr-flight">${EV_SYMBOL[it.kind]} ${it.label}</span></span>
+      <span class="sr-time">${shortTime((it.t - META.start) / 60)}</span>`;
+    row.title = it.detail;
+    row.onclick = () => jumpToEvent(it);
+    list.appendChild(row);
+    if (it.lat == null) return;
+    L.marker([it.lat, it.lon], {icon: L.divIcon({className: 'ev-icon ev-' + it.kind,
+        html: `<div>${EV_SYMBOL[it.kind]} ${it.label}</div>`, iconSize: null, iconAnchor: [0, 10]})})
+      .bindTooltip(it.detail + ' · ' + shortTime((it.t - META.start) / 60))
+      .on('click', () => jumpToEvent(it))
+      .addTo(eventLayer);
+  });
+  document.getElementById('events-note').textContent =
+    (items.length ? '' : 'None. ') +
+    (hidden ? hidden + ' close approach' + (hidden > 1 ? 'es' : '') + ' at airports, in formation or low-level not shown.' : '');
+}
+
 loadData();
 setInterval(loadData, 5 * 60 * 1000);
 

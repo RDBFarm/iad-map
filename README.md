@@ -22,6 +22,21 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
   a finished hour's file never changes, so each push only uploads the current
   hour.
 
+- `alerts.py` watches everything the receiver hears, every 2 seconds, for
+  squawk 7700, 7600 or 7500 (or the matching ADS-B emergency status). Seen on
+  3 reads in a row, it logs the event to
+  `/mnt/flightdata/iad-map/events/emergencies.jsonl` and pushes an alert file
+  to the `alerts` branch; `.github/workflows/emergency-alert.yml` then opens
+  an issue mentioning @RDBFarm, which the GitHub app turns into a phone
+  notification. Medical and minimum-fuel statuses are logged, not pushed.
+- `proximity.py`, run by `publish.py`, logs close approaches at any range to
+  `events/close_approaches.jsonl`: two airborne aircraft under 1 nm apart and
+  under 500 ft vertically, with flags for airport traffic, formation,
+  low-level and MLAT. They are close approaches, not confirmed near misses.
+  TCAS resolution advisories, if this readsb reports them, go to
+  `events/tcas.jsonl`. The live map marks emergencies, TCAS advisories and
+  unflagged close approaches, and lists them in the Events panel.
+
 `live.html` reads those files from raw.githubusercontent.com, and on its
 5-minute refresh fetches only the hour files that changed. GitHub Pages is not
 rebuilt. Install or update on the Pi with

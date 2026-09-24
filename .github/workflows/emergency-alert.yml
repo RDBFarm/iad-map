@@ -1,0 +1,33 @@
+# Opens an issue for each emergency alert the farm Pi pushes to the `alerts`
+# branch (pi/alerts.py). The issue is opened by github-actions[bot] and
+# mentions @RDBFarm, so GitHub notifies the owner; an issue opened with the
+# owner's own token would not, since GitHub doesn't notify you of your own
+# actions. The `alerts` branch starts from main, so it carries this file.
+name: Emergency alert
+on:
+  push:
+    branches: [alerts]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  open-issues:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Open an issue for each new alert file
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            files=$(git diff --name-only --diff-filter=A "$(git merge-base origin/main HEAD 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)" HEAD -- 'alerts/*.json')
+          else
+            files=$(git diff --name-only --diff-filter=A "$BEFORE" HEAD -- 'alerts/*.json')
+          fi
+          for f in $files; do
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "$(jq -r .title "$f")" --body "$(jq -r .body "$f")"
+          done

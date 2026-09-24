@@ -22,6 +22,9 @@ Table `positions`, one row per aircraft per read:
   on_ground  1 when readsb reports "ground"
   alt_geom, gs, track, baro_rate, geom_rate, rssi
   mlat       1 if the position came from MLAT
+  emergency  readsb's ADS-B emergency status when not "none" (general, nordo, ...)
+  acas_ra    a TCAS resolution advisory the aircraft broadcast, as readsb's
+             JSON, if this readsb reports one (not yet confirmed on the Pi)
 """
 import json, os, sqlite3, time
 
@@ -33,13 +36,13 @@ COMMIT_EVERY_S = 30
 
 COLUMNS = ["t", "hex", "flight", "type", "category", "squawk", "lat", "lon", "pos_t",
            "alt_baro", "on_ground", "alt_geom", "gs", "track", "baro_rate", "geom_rate",
-           "rssi", "mlat"]
+           "rssi", "mlat", "emergency", "acas_ra"]
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS positions (
   t REAL NOT NULL, hex TEXT NOT NULL, flight TEXT, type TEXT, category TEXT, squawk TEXT,
   lat REAL, lon REAL, pos_t REAL, alt_baro INTEGER, on_ground INTEGER,
   alt_geom INTEGER, gs REAL, track REAL, baro_rate INTEGER, geom_rate INTEGER,
-  rssi REAL, mlat INTEGER);
+  rssi REAL, mlat INTEGER, emergency TEXT, acas_ra TEXT);
 CREATE INDEX IF NOT EXISTS positions_t ON positions (t);
 """
 
@@ -72,6 +75,8 @@ def rows_from(data, last_msg):
             ac.get("alt_geom"), ac.get("gs"), ac.get("track"),
             ac.get("baro_rate"), ac.get("geom_rate"), ac.get("rssi"),
             1 if has_pos and "lat" in (ac.get("mlat") or []) else 0,
+            ac.get("emergency") if ac.get("emergency") not in (None, "none") else None,
+            json.dumps(ac["acas_ra"], separators=(",", ":")) if ac.get("acas_ra") else None,
         ))
     return out
 

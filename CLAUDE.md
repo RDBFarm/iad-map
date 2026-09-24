@@ -123,6 +123,12 @@ See `README.md` for how to install. In short:
 ### After installing, check
 - Drive growth per day, publisher memory on the Pi, whether aircraft types come through, whether the aviationweather.gov weather feed parses (untested — sandbox couldn't reach it), and `live.html` on the iPad.
 
+### Emergencies and close approaches (built 09-24, not yet installed)
+- **Emergencies (7500/7600/7700) push to his phone** — his choice (09-24): text or GitHub; just him; everything the receiver hears. Built as `pi/alerts.py` → alert file on the `alerts` branch (deploy key) → `.github/workflows/emergency-alert.yml` opens an issue as github-actions[bot] mentioning @RDBFarm. Not with his own token: GitHub doesn't notify you about your own actions. Needs 3 consecutive reads (~6 s). Medical/min-fuel statuses logged only. Test with `alerts.py --test` after install; he needs the GitHub app with notifications on.
+- **Near misses: a log plus map highlights, no push** (his choice, 09-24). `pi/proximity.py`: under 1 nm and 500 ft, both airborne; flags near_airport / low / persistent / mlat / tcas. Thresholds are first guesses — tune after real traffic. Call them close approaches, never near misses, unless a TCAS advisory confirms.
+- Whether this readsb reports TCAS advisories (`acas_ra`) is unconfirmed.
+- At phone width the live map's panels overlap (inherited layout, worse with the Events list). Not fixed.
+
 ### Planned, not built
 - **Weather radar overlay** — historical mode via IEM WMS-T NEXRAD (round the slider's UTC time to 5 min); live mode via RainViewer current tiles. Both as transparent overlays behind the dots.
 - **Layering live tracks on the heat map** was the original idea; the live map is a separate page instead, and the historical map is frozen.
