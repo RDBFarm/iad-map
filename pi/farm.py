@@ -29,17 +29,25 @@ SLICE_S = 900
 COMMIT_LAG_S = 90
 
 _TYPES = None
+_NAMES = {}
 
 
 def aircraft_types():
-    global _TYPES
+    global _TYPES, _NAMES
     if _TYPES is None:
         try:
             with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "aircraft_types.json")) as f:
-                _TYPES = json.load(f)["types"]
+                data = json.load(f)
+            _TYPES, _NAMES = data["types"], data.get("names", {})
         except (OSError, ValueError, KeyError):
             _TYPES = {}
     return _TYPES
+
+
+def type_name(actype):
+    """Manufacturer and model for an ICAO type code, e.g. 'CESSNA 172 Skyhawk'."""
+    aircraft_types()
+    return _NAMES.get((actype or "").upper())
 
 
 def is_prop(actype):

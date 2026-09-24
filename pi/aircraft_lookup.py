@@ -11,6 +11,7 @@ small SQLite table on the USB drive.
                                        the table; run by the installer and
                                        monthly by iad-map-aircraft-db.timer
   type_for(hex)                        the type code, or None if unknown
+  reg_for(hex)                         the registration, or None
 """
 import gzip, os, sqlite3, sys, time, urllib.request
 
@@ -23,27 +24,36 @@ _cache = {}
 
 def type_for(hexid):
     """ICAO type code for an ICAO address, or None. Cached per address."""
+    return _row(hexid)[1]
+
+
+def reg_for(hexid):
+    """Registration for an ICAO address, or None."""
+    return _row(hexid)[0]
+
+
+def _row(hexid):
+    """(registration, type) for an ICAO address; (None, None) if unknown."""
     global _db
     if not hexid or hexid.startswith("~"):
-        return None  # "~" marks a non-ICAO address (TIS-B etc.): no real airframe to look up
+        return (None, None)  # "~" marks a non-ICAO address (TIS-B etc.): no real airframe to look up
     hexid = hexid.lower()
     if hexid in _cache:
         return _cache[hexid]
     if len(_cache) > 20000:
         _cache.clear()
-    t = None
     try:
         if _db is None:
             if not os.path.exists(DB_PATH):
-                return None
+                return (None, None)
             _db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, check_same_thread=False)
-        row = _db.execute("SELECT type FROM aircraft WHERE hex = ?", (hexid,)).fetchone()
-        t = row[0] if row and row[0] else None
+        row = _db.execute("SELECT reg, type FROM aircraft WHERE hex = ?", (hexid,)).fetchone()
+        r = (row[0] or None, row[1] or None) if row else (None, None)
     except sqlite3.Error:
         _db = None
-        return None
-    _cache[hexid] = t
-    return t
+        return (None, None)
+    _cache[hexid] = r
+    return r
 
 
 def build():
