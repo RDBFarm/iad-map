@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""Watch for emergency squawks and push them to the owner's phone.
+
+Every 2 seconds, reads readsb's /run/readsb/aircraft.json -- every aircraft
+the receiver hears, at any range -- and looks for:
+
+  squawk 7700 (general emergency), 7600 (radio failure), 7500 (unlawful
+  interference), or the matching ADS-B emergency status (general, nordo,
+  unlawful).
+
+An aircraft has to show it on 3 reads in a row (~6 s) before it counts, so a
+single garbled message doesn't raise an alarm. Then, once per episode:
+
+  - the event is appended to /mnt/flightdata/iad-map/events/emergencies.jsonl
+  - an alert file is committed to the `alerts` branch and pushed with the
+    repo's deploy key; the GitHub Actions workflow on that branch opens an
+    issue mentioning @RDBFarm, which GitHub Mobile turns into a phone push.
+    (An issue opened with the owner's own token would not notify him:
+    GitHub doesn't notify you about your own actions.)
+
+Other ADS-B emergency statuses (lifeguard, minfuel, downed, reserved) are
+logged but not pushed; the owner asked for the three squawks only. An episode
+ends after 10 minutes without the code, and a later one alerts again.
+Pushes that fail (no internet) are retried every read until they succeed.
+
+  python3 alerts.py          run
+  python3 alerts.py --test   push one alert marked TEST, then exit
+"""
+import json, math, os, subprocess, sys, time
+
+AIRCRAFT_JSON = os.environ.get("IADMAP_AIRCRAFT_JSON", "/run/readsb/aircraft.json")
+RECEIVER_JSON = os.environ.get("IADMAP_RECEIVER_JSON", "/run/readsb/receiver.json")
+DRIVE = os.environ.get("IADMAP_DRIVE", "/mnt/flightdata")
+EVENTS_DIR = os.environ.get("IADMAP_EVENTS_DIR", os.path.join(DRIVE, "iad-map", "events"))
+REPO_DIR = os.environ.get("IADMAP_ALERTS_REPO", os.path.join(DRIVE, "iad-map", "alerts-repo"))
+DEPLOY_KEY = os.environ.get("IADMAP_DEPLOY_KEY", "/var/lib/iad-map/deploy_key")
+REMOTE = os.environ.get("IADMAP_REMOTE", "git@github.com:RDBFarm/iad-map.git")
+BRANCH = "alerts"
+INTERVAL_S = 2
+CONFIRM_READS = 3
+EPISODE_GAP_S = 600
+
+SQUAWKS = {"7700": "general emergency", "7600": "radio failure", "7500": "unlawful interference"}
+PUSH_STATUS = {"general": "7700", "nordo": "7600", "unlawful": "7500"}
+LOG_ONLY_STATUS = {"lifeguard", "minfuel", "downed", "reserved"}
+
+
+def git(*args, check=True):
+    env = dict(os.environ, GIT_SSH_COMMAND=(
+        f"ssh -i {DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "
+        f"-o UserKnownHostsFile={os.path.dirname(DEPLOY_KEY)}/known_hosts"))
+    return subprocess.run(["git", *args], cwd=REPO_DIR, env=env, check=check,
+                          timeout=120, capture_output=True, text=True)
+
+
+def ensure_repo():
+    """A checkout of the alerts branch; the first time, the branch starts
+    from main so it carries the workflow that opens the issues."""
+    if os.path.isdir(os.path.join(REPO_DIR, ".git")):
+        return
+    os.makedirs(REPO_DIR, exist_ok=True)
+    git("init", "-q")
+    git("remote", "add", "origin", REMOTE)
+    if git("fetch", "-q", "--depth=1", "origin", BRANCH, check=False).returncode == 0:
+        git("checkout", "-q", "-b", BRANCH, "FETCH_HEAD")
+    else:
+        git("fetch", "-q", "--depth=1", "origin", "main")
+        git("checkout", "-q", "-b", BRANCH, "FETCH_HEAD")
+
+
+def receiver_position():
+    try:
+        with open(RECEIVER_JSON) as f:
+            r = json.load(f)
+        return r.get("lat"), r.get("lon")
+    except (OSError, ValueError):
+        return None, None
+
+
+def dist_bearing(lat1, lon1, lat2, lon2):
+    p1, p2, dl = math.radians(lat1), math.radians(lat2), math.radians(lon2 - lon1)
+    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    nm = 3440.065 * 2 * math.asin(math.sqrt(a))
+    brg = math.degrees(math.atan2(math.sin(dl) * math.cos(p2),
+                                  math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)))
+    return nm, (brg + 360) % 360
+
+
+def compose(ev, test=False):
+    code = ev["code"]
+    what = SQUAWKS.get(code, ev.get("emergency") or "")
+    who = ev.get("flight") or ev["hex"].upper()
+    title = f"{'TEST — ' if test else ''}🚨 {code} {who}" + (f" ({ev['type']})" if ev.get("type") else "") + f" — {what}"
+    lines = [
+        f"@RDBFarm — heard by the farm receiver at {ev['utc']} UTC.",
+        "",
+        f"- **Code:** {code} ({what})" + (f"; ADS-B status: {ev['emergency']}" if ev.get("emergency") else ""),
+        f"- **Aircraft:** {who}, ICAO {ev['hex'].upper()}" + (f", type {ev['type']}" if ev.get("type") else ""),
+    ]
+    if ev.get("lat") is not None:
+        pos = f"- **Position:** {ev['lat']:.4f}, {ev['lon']:.4f}"
+        if ev.get("dist_nm") is not None:
+            pos += f" — {ev['dist_nm']:.0f} nm from the farm, bearing {ev['bearing']:.0f}°"
+        lines.append(pos)
+    else:
+        lines.append("- **Position:** not reported")
+    alt = ev.get("alt")
+    alt = f"{alt:,} ft" if isinstance(alt, (int, float)) else (alt or "not reported")
+    lines.append(f"- **Altitude:** {alt}"
+                 + (f"; **speed** {ev['gs']:.0f} kt" if ev.get("gs") is not None else "")
+                 + (f"; **track** {ev['track']:.0f}°" if ev.get("track") is not None else ""))
+    lines += ["",
+              f"[ADS-B Exchange](https://globe.adsbexchange.com/?icao={ev['hex']}) · "
+              f"[Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao={ev['hex']}) · "
+              "[Live map](https://rdbfarm.github.io/iad-map/live.html)",
+              "",
+              "_Automatic alert from `pi/alerts.py`. A squawk can be set by mistake and corrected "
+              "within seconds; this confirms only that the code was seen on 3 reads in a row._"]
+    return title, "\n".join(lines)
+
+
+def append_event(ev):
+    os.makedirs(EVENTS_DIR, exist_ok=True)
+    with open(os.path.join(EVENTS_DIR, "emergencies.jsonl"), "a") as f:
+        f.write(json.dumps(ev, separators=(",", ":")) + "\n")
+
+
+def queue_alert(ev, test=False):
+    """Commit the alert file; push_pending() sends it."""
+    ensure_repo()
+    title, body = compose(ev, test)
+    os.makedirs(os.path.join(REPO_DIR, "alerts"), exist_ok=True)
+    name = f"alerts/{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime(ev['t']))}-{ev['hex']}-{ev['code']}.json"
+    with open(os.path.join(REPO_DIR, name), "w") as f:
+        json.dump({"title": title, "body": body, "event": ev}, f, indent=1)
+    git("add", name)
+    git("-c", "user.name=RDBF ADS-B receiver", "-c", "user.email=adsb-receiver@localhost",
+        "commit", "-q", "-m", title)
+
+
+def push_pending():
+    """Push unpushed alert commits. Returns True when nothing is left."""
+    if not os.path.isdir(os.path.join(REPO_DIR, ".git")):
+        return True
+    r = git("push", "-q", "origin", f"HEAD:{BRANCH}", check=False)
+    if r.returncode != 0:
+        print("alerts: push failed, will retry:", r.stderr.strip()[:200], flush=True)
+        return False
+    return True
+
+
+def event_from(ac, code, status, now, rx):
+    ev = {"t": int(now), "utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now)),
+          "hex": ac.get("hex", ""), "flight": (ac.get("flight") or "").strip(), "type": ac.get("t"),
+          "code": code, "emergency": status if status not in (None, "none") else None,
+          "squawk": ac.get("squawk"), "lat": ac.get("lat"), "lon": ac.get("lon"),
+          "alt": ac.get("alt_baro"), "gs": ac.get("gs"), "track": ac.get("track"),
+          "mlat": 1 if "lat" in (ac.get("mlat") or []) else 0}
+    if rx[0] is not None and ev["lat"] is not None:
+        ev["dist_nm"], ev["bearing"] = [round(v, 1) for v in dist_bearing(rx[0], rx[1], ev["lat"], ev["lon"])]
+    return ev
+
+
+def watch():
+    streak = {}     # (hex, code) -> consecutive reads
+    active = {}     # (hex, code) -> last time seen
+    pending = False
+    rx = receiver_position()
+    while True:
+        started = time.time()
+        try:
+            with open(AIRCRAFT_JSON) as f:
+                data = json.load(f)
+        except (OSError, ValueError) as e:
+            print("alerts: skipped a reading:", e, flush=True)
+            data = {"aircraft": []}
+        now = data.get("now", started)
+        seen_now = set()
+        for ac in data.get("aircraft", []):
+            if ac.get("seen", 99) > 10:
+                continue
+            status = ac.get("emergency")
+            code = ac.get("squawk") if ac.get("squawk") in SQUAWKS else PUSH_STATUS.get(status)
+            if code is None and status in LOG_ONLY_STATUS:
+                code = status  # logged, never pushed
+            if code is None:
+                continue
+            key = (ac.get("hex"), code)
+            seen_now.add(key)
+            streak[key] = streak.get(key, 0) + 1
+            if streak[key] == CONFIRM_READS and key not in active:
+                ev = event_from(ac, code, status, now, rx)
+                ev["pushed"] = code in SQUAWKS
+                append_event(ev)
+                print("alerts:", ev["code"], ev["hex"], ev["flight"], flush=True)
+                if ev["pushed"]:
+                    try:
+                        queue_alert(ev)
+                        pending = True
+                    except (OSError, subprocess.SubprocessError) as e:
+                        print("alerts: could not queue alert:", e, flush=True)
+            if streak[key] >= CONFIRM_READS:
+                active[key] = now
+        for key in list(streak):
+            if key not in seen_now:
+                del streak[key]
+        for key, last in list(active.items()):
+            if now - last > EPISODE_GAP_S:
+                del active[key]
+        if pending:
+            pending = not push_pending()
+        time.sleep(max(0.2, INTERVAL_S - (time.time() - started)))
+
+
+def main():
+    if not os.path.ismount(DRIVE) and EVENTS_DIR.startswith(DRIVE):
+        raise SystemExit(f"alerts: {DRIVE} is not mounted; not writing to the SD card instead")
+    if "--test" in sys.argv:
+        rx = receiver_position()
+        ev = event_from({"hex": "000000", "flight": "TEST", "lat": rx[0], "lon": rx[1],
+                         "alt_baro": 0, "squawk": "7700"}, "7700", None, time.time(), rx)
+        ev["test"] = True
+        queue_alert(ev, test=True)
+        print("alerts: test alert", "pushed" if push_pending() else "NOT pushed — see the error above")
+        return
+    watch()
+
+
+if __name__ == "__main__":
+    main()

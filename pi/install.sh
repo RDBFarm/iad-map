@@ -29,7 +29,7 @@ mkdir -p "$HOME_DIR" "$DATA_DIR" /opt/iad-map
 chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR" "$DATA_DIR"
 
 echo "== Downloading the programs"
-for f in collector.py publish.py; do
+for f in collector.py publish.py proximity.py alerts.py; do
   curl -fsSL "$SRC/$f" -o "/opt/iad-map/$f"
 done
 chmod 755 /opt/iad-map/*.py
@@ -44,6 +44,23 @@ RequiresMountsFor=/mnt/flightdata
 [Service]
 User=$USER_NAME
 ExecStart=/usr/bin/python3 /opt/iad-map/collector.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > /etc/systemd/system/iad-map-alerts.service <<UNIT
+[Unit]
+Description=IAD map: push 7500/7600/7700 emergencies to the owner's phone
+After=readsb.service network-online.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/flightdata
+
+[Service]
+User=$USER_NAME
+ExecStart=/usr/bin/python3 /opt/iad-map/alerts.py
 Restart=always
 RestartSec=30
 
@@ -78,7 +95,7 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable --now iad-map-collector.service
-systemctl enable iad-map-publish.timer
+systemctl enable iad-map-publish.timer iad-map-alerts.service
 
 if [ ! -f "$HOME_DIR/deploy_key" ]; then
   sudo -u "$USER_NAME" ssh-keygen -q -t ed25519 -N "" -C "rdbf-adsb-pi" -f "$HOME_DIR/deploy_key"
@@ -91,5 +108,6 @@ echo " Copy the whole line below (it starts with ssh-ed25519):"
 echo
 cat "$HOME_DIR/deploy_key.pub"
 echo
-echo " Then run:  sudo systemctl start iad-map-publish.timer"
+echo " Then run:  sudo systemctl start iad-map-publish.timer iad-map-alerts.service"
+echo " To test the phone alert:  sudo -u $USER_NAME python3 /opt/iad-map/alerts.py --test"
 echo "=================================================================="
