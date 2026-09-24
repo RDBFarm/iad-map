@@ -153,7 +153,8 @@ See `README.md` for how to install. In short:
 
 ## 5. Security notes (09-24)
 
-- The old `deploy_to_github.py` (Mac only, never committed) contains a classic GitHub token for RDBFarm, expiring 2026-09-24 04:28 UTC. It did not appear in his token list. Don't copy it anywhere; the deploy script and `Deploy_Flight_Map.command` can be deleted from the Mac.
+- The old `deploy_to_github.py` (Mac only, never committed) held a classic GitHub token for RDBFarm. **Revoked 2026-09-24**: it was the "Claude deployment" token in his list (shown as "never used", which was wrong); deleting it made his Mac's check return "Bad credentials". The deploy script and `Deploy_Flight_Map.command` can be deleted.
+- **You cannot test a GitHub credential from a cloud session.** The session's gateway substitutes its own GitHub login on every api.github.com request: a made-up token also returned `login: RDBFarm`, with a moving expiry. Checks made that way on 09-23/24 reported the token alive with no scopes, and were all meaningless. Test credentials from his Mac, and test the test with a fake token first.
 - The old `fetch_adsb_data.py` contains S3 keys described as ADS-B Exchange's public sample keys — unverified. Keep them out of this public repo.
 - The old scripts disable HTTPS certificate checks (`ssl._create_unverified_context`). Don't carry that into new code.
 
