@@ -321,7 +321,7 @@
   <div id="btn-row">
     <button class="btn" id="btn-play" onclick="togglePlay()">▶ Play</button>
     <button class="btn" onclick="jumpTo(0)">⏮</button>
-    <button class="btn" onclick="jumpTo(SPAN)">Now</button>
+    <button class="btn" onclick="if (playing) togglePlay(); jumpTo(SPAN)">Now</button>
     <button class="btn" onclick="stepMin(-60)">−1h</button>
     <button class="btn" onclick="stepMin(60)">+1h</button>
     <span class="ctrl-lbl" style="margin-left:8px">Speed: <b id="speed-val">8×</b></span>
@@ -1034,8 +1034,9 @@ function animate(ts) {
   if (!playing) return;
   if (lastTs !== null) {
     _curMin += speed * ((ts - lastTs) / 1000);
-    if (_curMin > SPAN) _curMin = 0;
-    if (_curMin < 0) _curMin = SPAN;
+    // The end of the timeline is now: stop there rather than wrap around.
+    if (_curMin >= SPAN) { _curMin = SPAN; redraw(); togglePlay(); return; }
+    if (_curMin < 0) _curMin = 0;
     redraw();
   }
   lastTs = ts;
@@ -1047,7 +1048,10 @@ function togglePlay() {
   const b = document.getElementById('btn-play');
   b.textContent = playing ? '⏸ Pause' : '▶ Play';
   b.classList.toggle('active', playing);
-  if (playing) { stopPulse(); lastTs = null; requestAnimationFrame(animate); }
+  if (playing) {
+    if (_curMin >= SPAN) _curMin = 0;   // at now: replay the 24 hours from the start
+    stopPulse(); lastTs = null; requestAnimationFrame(animate);
+  }
 }
 
 function jumpTo(m) { _curMin = Math.max(0, Math.min(SPAN, m)); redraw(); }
