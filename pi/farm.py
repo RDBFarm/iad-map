@@ -11,7 +11,8 @@ alerts, at the owner's request (2026-09-24). An aircraft is a prop plane when
 its ICAO type is a fixed-wing type (landplane, seaplane, amphibian or
 gyrocopter) with piston, turboprop or electric engines, per
 aircraft_types.json. Helicopters and jets stay in. An aircraft whose type is
-unknown stays in: a missed alert costs more than an extra one.
+unknown stays in the figure and the map highlights (marked "type unknown")
+but is not pushed to the phone -- the owner's call, 2026-09-24.
 
 update() works through flights.db in 15-minute slices, like proximity.py,
 and appends one line per pass to events/farm_passes.jsonl -- props included,
