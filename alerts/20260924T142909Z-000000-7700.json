@@ -1,0 +1,23 @@
+{
+ "title": "TEST \u2014 \ud83d\udea8 7700 TEST \u2014 general emergency",
+ "body": "@RDBFarm \u2014 heard by the farm receiver at 2026-09-24 14:29:09 UTC.\n\n- **Code:** 7700 (general emergency)\n- **Aircraft:** TEST, ICAO 000000\n- **Position:** 39.1523, -77.4579 \u2014 0 nm from the farm, bearing 0\u00b0\n- **Altitude:** 0 ft\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=000000) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=000000) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`. A squawk can be set by mistake and corrected within seconds; this confirms only that the code was seen on 3 reads in a row._",
+ "event": {
+  "t": 1790260149,
+  "utc": "2026-09-24 14:29:09",
+  "hex": "000000",
+  "flight": "TEST",
+  "type": null,
+  "code": "7700",
+  "emergency": null,
+  "squawk": "7700",
+  "lat": 39.152293,
+  "lon": -77.457931,
+  "alt": 0,
+  "gs": null,
+  "track": null,
+  "mlat": 0,
+  "dist_nm": 0.0,
+  "bearing": 0.0,
+  "test": true
+ }
+}
