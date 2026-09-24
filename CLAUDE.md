@@ -115,9 +115,13 @@ See `README.md` for how to install. In short:
 - `live.html` JS heap ~50 MB (was ~220 MB before typed arrays). Not yet tried on an iPad.
 - SQLite ~78 bytes per row in the test database.
 
-### Decisions still OPEN
-- **Sampling interval:** 2 s for now (`IADMAP_INTERVAL_S`). His requirement is at least every 3 s; 1 s has been considered.
-- **Retention:** nothing is deleted. Estimate (not measured): ~1 GB/day at 2 s, so ~7 months on the 223 GB drive; the notes' earlier estimate was ~300 MB/day at 3 s. Measure after a day of running.
+### Decided 09-24
+- **Sampling interval: 2 s** (`IADMAP_INTERVAL_S`).
+- **Retention: keep the log until the drive is nearly full.** Built as: below 10 GB free, the collector deletes the oldest day at a time until 15 GB is free (`IADMAP_PRUNE_BELOW_GB` / `_TO_GB`); the database uses incremental auto-vacuum so the space really returns. Event logs in `events/` are never pruned. Growth estimate (not measured): ~1 GB/day, so ~7 months before pruning starts — measure after a day of running.
+- **Helicopters count** for the over-the-farm figure and alerts, for now.
+- **The office is not to go on the map** — the property line is already there.
+
+### Still OPEN
 - **Runway headings** in the copied classifier are runway numbers (magnetic); ADS-B track is true. KIAD listed as 19/199. Check with real traffic.
 
 ### After installing, check

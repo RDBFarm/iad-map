@@ -12,8 +12,9 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
 - `collector.py` logs everything the receiver hears, every 2 seconds, to
   SQLite at `/mnt/flightdata/iad-map/flights.db` on the USB drive: every
   aircraft with a new message, all ranges and altitudes, with or without a
-  position. It deletes nothing (how long to keep the log is undecided) and
-  won't start if the drive isn't mounted, so nothing lands on the SD card.
+  position. It keeps everything until the drive is nearly full: below 10 GB
+  free it deletes the oldest day at a time until 15 GB is free. It won't
+  start if the drive isn't mounted, so nothing lands on the SD card.
 - `publish.py` runs every 15 minutes, takes the last 24 hours of positions
   within 50 miles of Dulles at or below 15,000 ft, and writes, on the `live-data` branch,
   one file per hour of positions (`h/`) and an index, `live.json`, with the
