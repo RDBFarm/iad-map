@@ -1,0 +1,21 @@
+{
+ "title": "\u2708 Low over the farm: PAT26 (H60) at 700 ft",
+ "body": "@RDBFarm \u2014 PAT26 was 0.9 nm from the centre of the farm, and inside 1 nm, at 2026-09-24 21:47:38 UTC.\n\n- **Altitude:** 700 ft (reported pressure altitude, roughly above sea level; the farm's ground is a few hundred feet up)\n- **Speed:** 102 kt; **track** 320\u00b0\n- **Aircraft:** ICAO AE47EE, type H60\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=ae47ee) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=ae47ee) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`: within 1.0 nm of the farm below 1,500 ft on 2 reads in a row. Only known non-prop types (jets, helicopters) are alerted; unknown types are logged._",
+ "event": {
+  "kind": "low_pass",
+  "t": 1790286458,
+  "utc": "2026-09-24 21:47:38",
+  "hex": "ae47ee",
+  "flight": "PAT26",
+  "type": "H60",
+  "prop": false,
+  "alt": 700,
+  "gs": 102.2,
+  "track": 319.76,
+  "lat": 39.146615,
+  "lon": -77.442505,
+  "dist_nm": 0.9,
+  "mlat": 0,
+  "pushed": true
+ }
+}
