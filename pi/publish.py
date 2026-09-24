@@ -535,6 +535,24 @@ def push(index, files):
     git("gc", "-q", "--prune=now")
 
 
+def enrich(index):
+    """Give every aircraft named in an event its registration, type and the
+    type's full name, for the map's detail card. Looked up at publish time,
+    so events logged before a lookup existed get them too."""
+    def one(x):
+        h = x.get("hex")
+        x["type"] = x.get("type") or aircraft_lookup.type_for(h) or ""
+        x["reg"] = x.get("reg") or aircraft_lookup.reg_for(h)
+        x["type_name"] = farm.type_name(x["type"])
+        x["prop"] = farm.is_prop(x["type"]) if x.get("prop") is None else x["prop"]
+    ev = index["events"]
+    for e in ev["emergencies"] + ev["tcas"] + index["farm"]["passes"]:
+        one(e)
+    for e in ev["close_approaches"]:
+        one(e["a"])
+        one(e["b"])
+
+
 def main():
     if os.path.exists(DB_PATH):
         try:
@@ -549,6 +567,7 @@ def main():
             print("publish: farm-pass check failed:", e, flush=True)
     index, files = build(time.time())
     index["farm"]["summary"] = farm.summary(index["farm"]["passes"])
+    enrich(index)
     m = index["meta"]
     print(f"publish: {m['positions']} positions, {m['aircraft']} aircraft, "
           f"{m['mlat_positions']} MLAT positions, {m['aircraft_mlat_only']} aircraft seen only by MLAT, "
