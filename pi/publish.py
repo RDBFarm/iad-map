@@ -18,7 +18,7 @@ fetches from raw.githubusercontent.com, so GitHub Pages is not rebuilt.
   python3 publish.py            build and push
   python3 publish.py --no-push  build only, and print a summary
 """
-import hashlib, json, math, os, re, sqlite3, subprocess, sys, time, urllib.request
+import hashlib, json, math, os, sqlite3, subprocess, sys, time, urllib.request
 
 DB_PATH = os.environ.get("IADMAP_DB", "/mnt/flightdata/iad-map/flights.db")
 WORK_DIR = os.environ.get("IADMAP_PUBLISH_DIR", "/mnt/flightdata/iad-map/publish")
@@ -30,26 +30,278 @@ WX_URL = os.environ.get(
     "https://aviationweather.gov/api/data/metar?ids=KIAD&format=json&hours=25")
 SPAN_S = 24 * 3600
 
-# Airport ids as live.html numbers them; 7 is en-route.
-# A position is labelled with the nearest airport when it is within that
-# airport's radius and below its ceiling, except that an airline callsign is
-# never given a GA-only field. The radii and ceilings are this script's own
-# rule, chosen to resemble the historical map; they are not the classifier in
-# render_github.py, which isn't in this repository.
-AIRPORTS = [  # (id, lat, lon, radius_nm, ceiling_ft, ga_only)
-    (0, 38.9444, -77.4558, 15, 10000, False),  # KIAD
-    (1, 38.8521, -77.0377, 15, 10000, False),  # KDCA
-    (2, 39.1754, -76.6683, 15, 10000, False),  # KBWI
-    (3, 39.0779, -77.5578, 5, 3000, True),     # KJYO
-    (4, 39.1683, -77.1660, 5, 3000, True),     # KGAI
-    (5, 38.7214, -77.5153, 5, 3000, True),     # KHEF
-    (6, 38.5997, -77.4542, 5, 3000, True),     # KRMN
-    (8, 38.8108, -76.8674, 12, 8000, False),   # KADW
-    (9, 38.5036, -77.3050, 5, 3000, False),    # KNYG
-]
-# Three letters then a digit: the ICAO airline-callsign shape (UAL123, JIA5675).
-# Some military callsigns share it (PAT13); they are kept off GA-only fields too.
-AIRLINE_CALLSIGN = re.compile(r"^[A-Z]{3}[0-9]")
+# ── Classification: copied unchanged from render_github.py (the script that
+# builds the May 1 map, as of the copy last modified 2026-09-03), so the live
+# map labels and filters points the same way. Known issues in it are listed
+# in the README and are NOT fixed here without the owner's go-ahead.
+# BEGIN copied from render_github.py
+AIRPORTS = {
+    "KIAD": (38.9444, -77.4558, "Dulles"),
+    "KDCA": (38.8521, -77.0377, "Reagan Natl"),
+    "KBWI": (39.1754, -76.6683, "BWI"),
+    "KJYO": (39.0779, -77.5578, "Leesburg"),
+    "KGAI": (39.1683, -77.1660, "Gaithersburg"),
+    "KHEF": (38.7214, -77.5153, "Manassas"),
+    "KRMN": (38.5997, -77.4542, "Stafford"),
+    "KADW": (38.8108, -76.8674, "Andrews AFB"),
+    "KNYG": (38.5036, -77.3050, "Quantico MCAF"),
+}
+
+# Runway headings (both directions) for each airport
+# Used to score alignment between aircraft track and runway centerline
+AIRPORT_RUNWAYS = {
+    "KIAD": [19, 199, 120, 300],   # 01/19, 12/30
+    "KDCA": [19, 199, 150, 330],   # 01/19, 15/33
+    "KBWI": [100, 280, 150, 330],  # 10/28, 15/33
+    "KJYO": [170, 350],            # 17/35
+    "KGAI": [140, 320],            # 14/32
+    "KHEF": [160, 340],            # 16/34
+    "KRMN": [150, 330],            # 15/33
+    "KADW": [10, 190],             # 01/19 (parallel runways same heading)
+    "KNYG": [20, 200],             # 02/20
+}
+
+# GA category codes — these get proximity-only classification
+GA_CATEGORIES = {"A1", "A2", "B1"}
+
+# Known airline ICAO prefixes that serve IAD area airports
+# Maps prefix → most likely airport
+AIRLINE_AIRPORT = {
+    # IAD mainline & regionals
+    "UAL":"KIAD","UCA":"KIAD","SKW":"KIAD","ASA":"KIAD","AAL":"KIAD",
+    "DAL":"KIAD","SWA":"KIAD","JBU":"KIAD","FFT":"KIAD","VRD":"KIAD",
+    "AWI":"KIAD","ENY":"KIAD","RPA":"KIAD","PDT":"KIAD","GJS":"KIAD",
+    "MXY":"KIAD","JIA":"KIAD","ACJ":"KIAD",
+    # DCA mainline
+    "EGF":"KDCA","TCF":"KDCA",
+    # BWI focus carriers
+    "WN":"KBWI",
+    # Cargo
+    "FDX":"KIAD","UPS":"KIAD","ABX":"KIAD",
+    # Military IAD/region
+    "RCH":"KIAD","SAM":"KIAD","PAT":"KIAD","CAF":"KIAD",
+    "VMC":"KIAD","CFC":"KIAD",
+    # Andrews AFB military
+    "VV":"KADW","VM":"KADW","CNV":"KADW","EGL":"KADW",
+    "CPT":"KADW","TRF":"KADW","OSI":"KADW",
+    # Quantico / Marine One
+    "HMX":"KNYG","MX":"KNYG",
+}
+
+# These airports have NO commercial or airline service — GA only
+# Any flight with an airline callsign is NEVER assigned to these airports
+GA_ONLY_AIRPORTS = {"KJYO", "KGAI", "KHEF", "KRMN"}
+
+def is_airline_callsign(flight):
+    """Return True if callsign looks like an airline (3 letters + digits), not an N-number."""
+    if not flight or len(flight) < 4:
+        return False
+    prefix = flight[:3].upper()
+    # N-numbers start with N followed by digits — those are GA/private
+    if flight[0].upper() == "N" and flight[1].isdigit():
+        return False
+    # Airline callsigns are 3 alpha chars followed by digits
+    return prefix.isalpha() and flight[3].isdigit()
+
+def angle_diff(a, b):
+    """Smallest difference between two headings in degrees (0-180)."""
+    d = abs(a - b) % 360
+    return d if d <= 180 else 360 - d
+
+def classify_airport(lat, lon, alt, flight="", category="", track=0):
+    """
+    Multi-factor airport classification:
+    1. High altitude → enroute
+    2. Airline prefix known → use that airport (if also nearby/low)
+    3. Geometry: score each airport by distance + runway alignment
+    4. GA fallback: nearest airport within radius
+    """
+    R = 3958.8
+
+    def dist_mi(alat, alon):
+        phi1, phi2 = math.radians(lat), math.radians(alat)
+        dphi = math.radians(alat - lat)
+        dlam = math.radians(alon - lon)
+        a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlam/2)**2
+        return R * 2 * math.asin(math.sqrt(a))
+
+    # High altitude = definitely enroute
+    if alt > 10000:
+        return "enroute"
+
+    # Build distance map for all airports
+    distances = {code: dist_mi(info[0], info[1]) for code, info in AIRPORTS.items()}
+
+    # Must be within 20 miles of SOME airport to classify
+    min_dist = min(distances.values())
+    if min_dist > 20:
+        return "enroute"
+
+    # Extract airline prefix (first 3 chars of callsign if not N-number)
+    is_ga = (category in GA_CATEGORIES or
+             (flight and flight[0].upper() == "N" and len(flight) > 1 and flight[1].isdigit()) or
+             not flight)
+
+    # For GA: simple nearest airport within 6 miles under 3000ft
+    if is_ga:
+        if alt > 3000:
+            return "enroute"
+        best = min(distances, key=distances.get)
+        return best if distances[best] <= 6 else "enroute"
+
+    # HARD RULE: airline callsigns can NEVER be classified as GA-only airports
+    # KJYO, KGAI, KHEF, KRMN have zero scheduled commercial service
+    airline = is_airline_callsign(flight)
+
+    # For commercial: check airline prefix hint first
+    prefix = flight[:3].upper() if len(flight) >= 3 else ""
+    hint = AIRLINE_AIRPORT.get(prefix)
+
+    # Score each airport: lower is better
+    # Score = distance_weight + alignment_penalty
+    best_ap, best_score = "enroute", 999
+
+    for code, (alat, alon, _) in AIRPORTS.items():
+        d = distances[code]
+        if d > 20:
+            continue
+        # Hard rule: airline flights cannot land at GA-only airports
+        if airline and code in GA_ONLY_AIRPORTS:
+            continue
+
+        # Distance score: 0 at airport, increases with distance
+        dist_score = d * 2.0
+
+        # Runway alignment score: how well does track match any runway heading?
+        if track and code in AIRPORT_RUNWAYS:
+            min_align = min(angle_diff(track, rwy) for rwy in AIRPORT_RUNWAYS[code])
+            # 0° alignment = 0 penalty, 90° = 20 penalty — stronger signal
+            align_score = (min_align / 90.0) * 20.0
+        else:
+            align_score = 10.0  # neutral if no track data
+
+        # Airline hint bonus: strongly prefer the hinted airport
+        # Must be strong enough to override proximity to smaller airports
+        hint_bonus = -20.0 if (hint == code) else 0.0
+
+        # Altitude modifier: lower alt near airport = stronger signal
+        alt_factor = max(0.5, 1.0 - (alt / 10000))
+
+        score = (dist_score + align_score + hint_bonus) * alt_factor
+
+        if score < best_score:
+            best_score = score
+            best_ap = code
+
+    return best_ap if best_score < 15 else "enroute"
+
+# Ground vehicle category codes — never include these
+GROUND_VEHICLE_CATEGORIES = {"C1", "C2", "C3", "C4", "C5"}
+
+def is_arrival(alt, gs, baro_rate, track, lat, lon, category, flight=""):
+    """
+    Return True if this point looks like an inbound aircraft rather than a departure.
+    Keeps: descending aircraft, landing rollout, go-arounds, holds, flybys.
+    Drops: departures, ground vehicles, parked/taxiing aircraft.
+    """
+    # Drop ground vehicles entirely
+    if category in GROUND_VEHICLE_CATEGORIES:
+        return False
+    # Ground level handling — only keep landing rollout (gs > 40 kts)
+    if alt < 200:
+        return gs > 40
+    # Low but airborne — keep (final approach, flare)
+    if alt < 2000:
+        return True
+    # GA departure check — slower thresholds than commercial
+    if category in GA_CATEGORIES:
+        # If climbing fast enough and heading away from all runways = departure
+        if gs > 70 and alt > 500 and alt < 4000:
+            if baro_rate > 300:  # definitely climbing
+                best_align = min(
+                    angle_diff(track, rwy)
+                    for runways in AIRPORT_RUNWAYS.values()
+                    for rwy in runways
+                )
+                if best_align > 60:
+                    return False
+        return True
+    # If we have baro_rate data: keep descending or level, drop strong climbers
+    if baro_rate != 0:
+        # Climbing fast at jet speed = departure
+        if baro_rate > 500 and gs > 180 and alt > 500:
+            return False
+        # Descending = arrival
+        if baro_rate < -200:
+            return True
+        # Level or gentle climb (hold, go-around, flyby) = keep
+        return True
+    # No baro_rate — use heading + speed to catch obvious departures
+    # A fast airline flight with heading that doesn't align with ANY airport runway
+    # in the region is almost certainly a departure climbing out
+    if gs > 200 and alt > 2000 and alt < 8000 and is_airline_callsign(flight):
+        # Check if track aligns within 60° of any runway at any of our airports
+        best_align = 180
+        for code, runways in AIRPORT_RUNWAYS.items():
+            for rwy in runways:
+                diff = angle_diff(track, rwy)
+                if diff < best_align:
+                    best_align = diff
+        # If heading doesn't match any runway within 60° = likely departure
+        if best_align > 60:
+            return False
+    # Slow or aligned with a runway = keep
+    return True
+# END copied from render_github.py
+
+# Departure detection, same rule as render_github.py: per aircraft, in time
+# order, a run of 3+ consecutive rises of more than 100 ft starting below
+# 500 ft is a departure; its points above 200 ft are dropped.
+# The rule was written for the historical data, where an aircraft's points
+# are about 10 s apart. At 2 s a normal climb gains under 100 ft per step and
+# the rule would miss it, so it is applied to each aircraft's points thinned
+# to >= 10 s apart, and every logged point inside a flagged climb is dropped.
+# Only the rule's input is thinned; the map keeps every point it doesn't drop.
+CLIMB_STEPS = 3
+CLIMB_MIN_FT = 100
+CLIMB_SPACING_S = 10
+
+
+def departure_points(rows):
+    """Set of (hex, t) for points in a departure climb. rows are time-sorted."""
+    by_hex = {}
+    for r in rows:
+        by_hex.setdefault(r[1], []).append((r[0], r[4]))
+    flagged = set()
+    for hexid, all_pts in by_hex.items():
+        pts = []
+        for t, alt in all_pts:
+            if not pts or t - pts[-1][0] >= CLIMB_SPACING_S:
+                pts.append((t, alt))
+        i = 0
+        while i < len(pts):
+            if pts[i][1] < 500:
+                climb_count = 0
+                j = i + 1
+                while j < len(pts) and pts[j][1] > pts[j - 1][1] + CLIMB_MIN_FT:
+                    climb_count += 1
+                    j += 1
+                if climb_count >= CLIMB_STEPS:
+                    # up to the next thinned point, or the end if the climb ran out the data
+                    t0 = pts[i][0]
+                    t_end = pts[j][0] if j < len(pts) else float("inf")
+                    for t, alt in all_pts:
+                        if t0 <= t < t_end and alt > 200:
+                            flagged.add((hexid, t))
+                i = j if j > i else i + 1
+            else:
+                i += 1
+    return flagged
+
+
+# live.html's airport ids
+AIRPORT_IDS = {"KIAD": 0, "KDCA": 1, "KBWI": 2, "KJYO": 3, "KGAI": 4, "KHEF": 5,
+               "KRMN": 6, "enroute": 7, "KADW": 8, "KNYG": 9}
 CENTER = (38.9444, -77.4558)
 RADIUS_NM = 43.45  # 50 statute miles
 MAX_ALT_FT = 15000
@@ -62,21 +314,9 @@ def dist_nm(lat1, lon1, lat2, lon2):
     return 3440.065 * 2 * math.asin(math.sqrt(a))
 
 
-def airport_for(lat, lon, alt, flight):
-    airline = bool(AIRLINE_CALLSIGN.match(flight or ""))
-    best, best_d = 7, None
-    for ap, alat, alon, radius, ceiling, ga_only in AIRPORTS:
-        if ga_only and airline:
-            continue
-        d = dist_nm(lat, lon, alat, alon)
-        if d <= radius and alt < ceiling and (best_d is None or d < best_d):
-            best, best_d = ap, d
-    return best
-
-
 def load_points(start, end):
     """Map positions from the log, as
-    [t, hex, lat, lon, alt, gs, track, vrate, flight, type, mlat], one per
+    [t, hex, lat, lon, alt, gs, track, vrate, flight, type, mlat, category], one per
     distinct position (an aircraft's other messages repeat its last one)."""
     if not os.path.exists(DB_PATH):
         return []
@@ -85,7 +325,7 @@ def load_points(start, end):
     db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=60)
     cur = db.execute("""
         SELECT pos_t, hex, lat, lon, CASE WHEN on_ground = 1 THEN 0 ELSE alt_baro END,
-               gs, track, COALESCE(baro_rate, geom_rate), flight, type, mlat
+               gs, track, COALESCE(baro_rate, geom_rate), flight, type, mlat, category
         FROM positions
         WHERE t BETWEEN ? AND ? AND pos_t BETWEEN ? AND ?
           AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
@@ -94,14 +334,14 @@ def load_points(start, end):
          CENTER[0] - lat_pad, CENTER[0] + lat_pad, CENTER[1] - lon_pad, CENTER[1] + lon_pad,
          MAX_ALT_FT))
     rows, seen = [], set()
-    for t, hexid, lat, lon, alt, gs, track, vrate, flight, actype, mlat in cur:
+    for t, hexid, lat, lon, alt, gs, track, vrate, flight, actype, mlat, category in cur:
         key = (hexid, t)
         if key in seen or dist_nm(lat, lon, *CENTER) > RADIUS_NM:
             continue
         seen.add(key)
         rows.append([int(t), hexid, round(lat, 5), round(lon, 5), int(alt),
                      None if gs is None else round(gs), None if track is None else round(track),
-                     vrate, flight or "", actype or "", mlat])
+                     vrate, flight or "", actype or "", mlat, category or ""])
     db.close()
     return rows
 
@@ -153,15 +393,19 @@ def fetch_weather(start):
 
 def hour_chunk(rows, hour_start):
     """One hour's positions. Aircraft identity is stored once per hour in
-    `ac` as [hex, flight, type]; each point is
+    `ac` as [hex, flight, type, ga]; each point is
     [lat, lon, alt_ft, seconds_into_hour, airport_id, ac_index, gs, track, vrate]."""
     ac, ac_index, pts = [], {}, []
-    for t, hexid, lat, lon, alt, gs, track, vrate, flight, actype, mlat in rows:
-        key = (hexid, flight, actype)
+    for t, hexid, lat, lon, alt, gs, track, vrate, flight, actype, mlat, category in rows:
+        # render_github.py's GA test, as written there (any callsign starting
+        # with "N" counts; see README). live.html skips its own filter for these.
+        ga = 1 if (category in GA_CATEGORIES or (flight and flight[0] == "N") or not flight) else 0
+        key = (hexid, flight, actype, ga)
         if key not in ac_index:
             ac_index[key] = len(ac)
-            ac.append([hexid, flight, actype])
-        pts.append([lat, lon, alt, t - hour_start, airport_for(lat, lon, alt, flight),
+            ac.append([hexid, flight, actype, ga])
+        ap = classify_airport(lat, lon, alt, flight, category, track or 0)
+        pts.append([lat, lon, alt, t - hour_start, AIRPORT_IDS.get(ap, 7),
                     ac_index[key], gs, track, vrate])
     return {"start": hour_start, "ac": ac, "pts": pts}
 
@@ -171,8 +415,14 @@ def build(now):
     end = int(now)
     start = end - SPAN_S
     first_hour = start - start % 3600
-    raw = [r for r in load_points(first_hour, end) if r[4] <= MAX_ALT_FT]
-    raw.sort(key=lambda r: (r[0], r[1]))
+    logged = [r for r in load_points(first_hour, end) if r[4] <= MAX_ALT_FT]
+    logged.sort(key=lambda r: (r[0], r[1]))
+    departures = departure_points(logged)
+    # Same filters as render_github.py: drop departure climbs, then anything
+    # is_arrival() rejects (ground vehicles, taxiing, fast climb-outs).
+    raw = [r for r in logged
+           if (r[1], r[0]) not in departures
+           and is_arrival(r[4], r[5] or 0, r[7] or 0, r[6] or 0, r[2], r[3], r[11], r[8])]
     by_hour = {}
     for r in raw:
         by_hour.setdefault(r[0] - r[0] % 3600, []).append(r)
@@ -184,14 +434,17 @@ def build(now):
         files[name] = body
         chunks.append({"name": name, "hash": hashlib.sha1(body).hexdigest()[:12]})
     window = [r for r in raw if r[0] >= start]
-    mlat_ac = {r[1] for r in window if r[10]}
-    adsb_ac = {r[1] for r in window if not r[10]}
+    heard = [r for r in logged if r[0] >= start]
+    mlat_ac = {r[1] for r in heard if r[10]}
+    adsb_ac = {r[1] for r in heard if not r[10]}
     index = {
         "meta": {
             "start": start, "end": end, "built": end,
             "span_min": SPAN_S // 60,
-            "positions": len(window), "aircraft": len(mlat_ac | adsb_ac),
-            "mlat_positions": sum(1 for r in window if r[10]),
+            "positions": len(window), "aircraft": len({r[1] for r in window}),
+            "positions_in_area": len(heard),
+            "departure_points_dropped": sum(1 for r in heard if (r[1], r[0]) in departures),
+            "mlat_positions": sum(1 for r in heard if r[10]),
             "aircraft_mlat_only": len(mlat_ac - adsb_ac),
             "receiver": "Red Devil Bison Farm, Poolesville MD",
         },

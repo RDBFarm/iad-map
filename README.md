@@ -30,8 +30,28 @@ rebuilt. Install or update on the Pi with
 Dots are coloured by altitude in viridis, brightest at the ground; nothing on
 the live map relies on telling red, green and yellow apart.
 
-The airport labels on the live map come from `publish.py`'s own rule: nearest
-airport within 15 nm and below 10,000 ft for IAD, DCA and BWI (12 nm, 8,000 ft
-for Andrews), 5 nm and below 3,000 ft for the smaller fields, and an airline-shaped callsign (three letters then a
-digit) is never given Leesburg, Gaithersburg, Manassas or Stafford. It is not the
-rule behind the May 1 map, which is not recorded here.
+## Classification
+
+The live map labels and filters points with `classify_airport()`,
+`is_arrival()` and the climb-sequence departure rule copied unchanged from
+`render_github.py`, the Mac script that builds the May 1 map. One adaptation:
+the departure rule ("3+ rises of over 100 ft in a row from below 500 ft") was
+written for points about 10 s apart, so it is applied to each aircraft's
+points thinned to 10 s; every logged point inside a flagged climb is dropped,
+and nothing else is thinned.
+
+Issues found in that code on 2026-09-24, copied as they are and not yet fixed
+(each needs the owner's go-ahead):
+
+- `KEEP_EVERY_N = 2` in render_github.py drops every other cache row by file
+  position. (Not copied: the live map keeps every point.)
+- The GA test used for the map's points treats *any* callsign starting with
+  "N" as GA, while `classify_airport()` requires N followed by a digit.
+- `AIRLINE_AIRPORT` has two-letter keys (WN, VV, VM, MX) that can never
+  match, since the code compares three letters.
+- Runway headings are runway numbers (magnetic); ADS-B track is true north.
+  KIAD is listed as 19/199. Not yet checked against published true bearings.
+- render_github.py turns off HTTPS certificate checks for all its downloads.
+- On the May 1 map, the weather request covers May 1 local time only, so
+  8 PM to midnight on Apr 30 shows the 12:52 AM May 1 report; and the
+  "5,800 aircraft" badge is typed in, not counted.
