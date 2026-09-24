@@ -20,6 +20,7 @@ fetches from raw.githubusercontent.com, so GitHub Pages is not rebuilt.
 """
 import hashlib, json, math, os, sqlite3, subprocess, sys, time, urllib.request
 
+import farm
 import proximity
 
 DB_PATH = os.environ.get("IADMAP_DB", "/mnt/flightdata/iad-map/flights.db")
@@ -464,6 +465,12 @@ def build(now):
             "close_approaches": proximity.recent(EVENTS_DIR, "close_approaches.jsonl", start),
             "tcas": proximity.recent(EVENTS_DIR, "tcas.jsonl", start),
         },
+        # Aircraft over the farm (farm.py): every pass in the window, props
+        # included and marked; the summary leaves props out.
+        "farm": {
+            "center": list(farm.FARM), "radius_nm": farm.FARM_RADIUS_NM,
+            "passes": proximity.recent(EVENTS_DIR, "farm_passes.jsonl", start),
+        },
         "chunks": chunks,
     }
     return index, files
@@ -533,7 +540,13 @@ def main():
             print(f"publish: {n} close approaches logged", flush=True)
         except Exception as e:  # never let this stop the map
             print("publish: close-approach check failed:", e, flush=True)
+        try:
+            n = farm.update(DB_PATH, EVENTS_DIR)
+            print(f"publish: {n} passes over the farm logged", flush=True)
+        except Exception as e:  # never let this stop the map
+            print("publish: farm-pass check failed:", e, flush=True)
     index, files = build(time.time())
+    index["farm"]["summary"] = farm.summary(index["farm"]["passes"])
     m = index["meta"]
     print(f"publish: {m['positions']} positions, {m['aircraft']} aircraft, "
           f"{m['mlat_positions']} MLAT positions, {m['aircraft_mlat_only']} aircraft seen only by MLAT, "

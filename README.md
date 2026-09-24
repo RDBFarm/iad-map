@@ -37,6 +37,14 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
   `events/tcas.jsonl`. The live map marks emergencies, TCAS advisories and
   unflagged close approaches, and lists them in the Events panel.
 
+- `farm.py` logs every aircraft passing within 1 nm of the farm parcel's
+  centre, at any altitude, to `events/farm_passes.jsonl`. The live map shows
+  the last 24 hours as a figure (count, median and lowest altitude) and
+  highlights passes under 2,000 ft; `alerts.py` pushes passes under 1,500 ft
+  to the phone. Propeller aeroplanes (piston, turboprop or electric
+  fixed-wing, by ICAO type in `aircraft_types.json`, from tar1090-db) are left
+  out of all three; helicopters, jets and unknown types stay in.
+
 `live.html` reads those files from raw.githubusercontent.com, and on its
 5-minute refresh fetches only the hour files that changed. GitHub Pages is not
 rebuilt. Install or update on the Pi with

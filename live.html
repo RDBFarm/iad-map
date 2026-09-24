@@ -165,6 +165,7 @@
     padding:1px 5px; font-size:0.66rem; font-weight:700; white-space:nowrap;
     box-shadow:0 0 0 1.5px rgba(255,255,255,0.8); }
   .ev-icon.ev-emergency div { border-width:2.5px; font-size:0.72rem; }
+  .ev-icon.ev-low div { border-style:dashed; }
   #search-count { font-size:0.65rem; color:#556; margin-top:4px; }
 
   /* click popup */
@@ -218,6 +219,8 @@
   <div id="search-count"></div>
   <div id="search-results"></div>
   <div id="events">
+    <h3>🦬 Over the farm (1 nm), last 24 h</h3>
+    <div id="farm-summary" style="line-height:1.5">—</div>
     <h3>⚠ Events, last 24 h</h3>
     <div id="events-list" style="max-height:160px;overflow-y:auto"></div>
     <div id="events-note"></div>
@@ -1149,7 +1152,8 @@ async function loadData() {
   upd.textContent = 'updated ' + FMT_TIME.format(new Date(META.built * 1000)).replace(/^0/, '') +
     (age > STALE_MIN ? ' — ' + Math.round(age / 60 * 10) / 10 + ' h ago, the Pi may be offline' : '');
   upd.style.color = age > STALE_MIN ? '#ff9f40' : '';
-  drawEvents(idx.events);
+  drawFarm(idx.farm);
+  drawEvents(Object.assign({}, idx.events, {farm_passes: idx.farm ? idx.farm.passes : []}));
   if (searchActive) doSearch(document.getElementById('search-input').value); else redraw();
 }
 drawLegend();
@@ -1158,7 +1162,24 @@ drawLegend();
 // flagged as airport traffic, formation or low-level are listed as a count
 // only; see pi/proximity.py for what the flags mean.
 const eventLayer = L.layerGroup().addTo(map);
-const EV_SYMBOL = {emergency: '▲', tcas: '◆', close: '◇'};
+const EV_SYMBOL = {emergency: '▲', tcas: '◆', close: '◇', low: '▼'};
+const LOW_HIGHLIGHT_FT = 2000;   // owner's choice, 2026-09-24
+let farmRing = null;
+
+function drawFarm(f) {
+  if (!f) return;
+  if (!farmRing) {
+    farmRing = L.circle(f.center, {radius: f.radius_nm * 1852, color: '#fff', weight: 1.5,
+      dashArray: '4 4', fill: false, interactive: false}).addTo(map);
+  }
+  const s = f.summary || {};
+  const fmt = n => Math.round(n).toLocaleString() + ' ft';
+  document.getElementById('farm-summary').innerHTML = s.aircraft
+    ? `<b>${s.aircraft}</b> aircraft · median <b>${fmt(s.median_alt)}</b> · lowest <b>${fmt(s.lowest_alt)}</b>` +
+      `<br>${s.under_2000} under 2,000 ft` +
+      (s.props_excluded ? ` · ${s.props_excluded} prop plane${s.props_excluded > 1 ? 's' : ''} not counted` : '')
+    : 'No aircraft yet' + (s.props_excluded ? ` (${s.props_excluded} prop planes not counted)` : '') + '.';
+}
 
 function eventItems(ev) {
   const items = [];
@@ -1177,6 +1198,14 @@ function eventItems(ev) {
     items.push({kind: 'close', t: e.cpa_t, lat: (e.a.lat + e.b.lat) / 2, lon: (e.a.lon + e.b.lon) / 2,
       label: 'Close: ' + who,
       detail: 'Close approach ' + e.h_nm + ' nm, ' + e.v_ft + ' ft' + (f.includes('mlat') ? ' (MLAT position)' : '')});
+  });
+  (ev.farm_passes || []).forEach(p => {
+    if (p.prop === true || !(p.alt < LOW_HIGHLIGHT_FT)) return;
+    const who = p.flight || p.hex.toUpperCase();
+    items.push({kind: 'low', t: p.t, lat: p.lat, lon: p.lon,
+      label: who + ' ' + Math.round(p.alt).toLocaleString() + ' ft',
+      detail: 'Over the farm at ' + Math.round(p.alt).toLocaleString() + ' ft, ' + p.dist_nm + ' nm from centre' +
+        (p.type ? ' (' + p.type + ')' : ' (type unknown)')});
   });
   items.sort((a, b) => b.t - a.t);
   return {items, hidden};

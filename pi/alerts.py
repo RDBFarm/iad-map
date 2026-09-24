@@ -18,6 +18,11 @@ single garbled message doesn't raise an alarm. Then, once per episode:
     (An issue opened with the owner's own token would not notify him:
     GitHub doesn't notify you about your own actions.)
 
+Also pushed: any aircraft within 1 nm of the farm below 1,500 ft (reported
+pressure altitude), seen on 2 reads in a row, except propeller aeroplanes
+(farm.py decides; unknown types are pushed). Once per aircraft per 10
+minutes; logged to events/low_passes.jsonl. Owner's request, 2026-09-24.
+
 Other ADS-B emergency statuses (lifeguard, minfuel, downed, reserved) are
 logged but not pushed; the owner asked for the three squawks only. An episode
 ends after 10 minutes without the code, and a later one alerts again.
@@ -27,6 +32,8 @@ Pushes that fail (no internet) are retried every read until they succeed.
   python3 alerts.py --test   push one alert marked TEST, then exit
 """
 import json, math, os, subprocess, sys, time
+
+import farm
 
 AIRCRAFT_JSON = os.environ.get("IADMAP_AIRCRAFT_JSON", "/run/readsb/aircraft.json")
 RECEIVER_JSON = os.environ.get("IADMAP_RECEIVER_JSON", "/run/readsb/receiver.json")
@@ -43,6 +50,9 @@ EPISODE_GAP_S = 600
 SQUAWKS = {"7700": "general emergency", "7600": "radio failure", "7500": "unlawful interference"}
 PUSH_STATUS = {"general": "7700", "nordo": "7600", "unlawful": "7500"}
 LOG_ONLY_STATUS = {"lifeguard", "minfuel", "downed", "reserved"}
+LOW_PASS_FT = 1500
+LOW_PASS_READS = 2
+LOW_PASS_REPEAT_S = 600
 
 
 def git(*args, check=True):
@@ -86,7 +96,30 @@ def dist_bearing(lat1, lon1, lat2, lon2):
     return nm, (brg + 360) % 360
 
 
+def compose_low_pass(ev):
+    who = ev.get("flight") or ev["hex"].upper()
+    kind = {False: "", None: " (type unknown)"}.get(ev.get("prop"), "")
+    title = f"✈ Low over the farm: {who}" + (f" ({ev['type']})" if ev.get("type") else "") + f" at {ev['alt']:,} ft"
+    body = "\n".join([
+        f"@RDBFarm — {who}{kind} was {ev['dist_nm']} nm from the centre of the farm, and inside 1 nm, at {ev['utc']} UTC.",
+        "",
+        f"- **Altitude:** {ev['alt']:,} ft (reported pressure altitude, roughly above sea level; "
+        "the farm's ground is a few hundred feet up)",
+        f"- **Speed:** {ev['gs']:.0f} kt; **track** {ev['track']:.0f}°" if ev.get("gs") is not None and ev.get("track") is not None else "- **Speed/track:** not reported",
+        f"- **Aircraft:** ICAO {ev['hex'].upper()}" + (f", type {ev['type']}" if ev.get("type") else ", type not reported"),
+        "",
+        f"[ADS-B Exchange](https://globe.adsbexchange.com/?icao={ev['hex']}) · "
+        f"[Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao={ev['hex']}) · "
+        "[Live map](https://rdbfarm.github.io/iad-map/live.html)",
+        "",
+        f"_Automatic alert from `pi/alerts.py`: within {farm.FARM_RADIUS_NM} nm of the farm below "
+        f"{LOW_PASS_FT:,} ft on {LOW_PASS_READS} reads in a row. Propeller aeroplanes are not alerted._"])
+    return title, body
+
+
 def compose(ev, test=False):
+    if ev.get("kind") == "low_pass":
+        return compose_low_pass(ev)
     code = ev["code"]
     what = SQUAWKS.get(code, ev.get("emergency") or "")
     who = ev.get("flight") or ev["hex"].upper()
@@ -119,9 +152,9 @@ def compose(ev, test=False):
     return title, "\n".join(lines)
 
 
-def append_event(ev):
+def append_event(ev, name="emergencies.jsonl"):
     os.makedirs(EVENTS_DIR, exist_ok=True)
-    with open(os.path.join(EVENTS_DIR, "emergencies.jsonl"), "a") as f:
+    with open(os.path.join(EVENTS_DIR, name), "a") as f:
         f.write(json.dumps(ev, separators=(",", ":")) + "\n")
 
 
@@ -130,7 +163,8 @@ def queue_alert(ev, test=False):
     ensure_repo()
     title, body = compose(ev, test)
     os.makedirs(os.path.join(REPO_DIR, "alerts"), exist_ok=True)
-    name = f"alerts/{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime(ev['t']))}-{ev['hex']}-{ev['code']}.json"
+    name = (f"alerts/{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime(ev['t']))}-{ev['hex']}-"
+            f"{ev.get('code') or ev.get('kind')}.json")
     with open(os.path.join(REPO_DIR, name), "w") as f:
         json.dump({"title": title, "body": body, "event": ev}, f, indent=1)
     git("add", name)
@@ -161,9 +195,32 @@ def event_from(ac, code, status, now, rx):
     return ev
 
 
+def low_pass_candidate(ac):
+    alt = ac.get("alt_baro")
+    if not isinstance(alt, (int, float)) or alt >= LOW_PASS_FT:
+        return False   # "ground", missing, or high enough
+    if ac.get("lat") is None or ac.get("seen_pos", 99) > 10:
+        return False
+    if farm.dist_nm(ac["lat"], ac["lon"]) > farm.FARM_RADIUS_NM:
+        return False
+    return farm.is_prop(ac.get("t")) is not True
+
+
+def low_pass_event(ac, now):
+    return {"kind": "low_pass", "t": int(now),
+            "utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now)),
+            "hex": ac.get("hex", ""), "flight": (ac.get("flight") or "").strip(), "type": ac.get("t"),
+            "prop": farm.is_prop(ac.get("t")), "alt": ac.get("alt_baro"), "gs": ac.get("gs"),
+            "track": ac.get("track"), "lat": ac.get("lat"), "lon": ac.get("lon"),
+            "dist_nm": round(farm.dist_nm(ac["lat"], ac["lon"]), 2),
+            "mlat": 1 if "lat" in (ac.get("mlat") or []) else 0}
+
+
 def watch():
     streak = {}     # (hex, code) -> consecutive reads
     active = {}     # (hex, code) -> last time seen
+    low_streak = {}  # hex -> consecutive low reads over the farm
+    low_last = {}    # hex -> time of last low-pass alert
     pending = False
     rx = receiver_position()
     while True:
@@ -176,9 +233,24 @@ def watch():
             data = {"aircraft": []}
         now = data.get("now", started)
         seen_now = set()
+        low_now = set()
         for ac in data.get("aircraft", []):
             if ac.get("seen", 99) > 10:
                 continue
+            if low_pass_candidate(ac):
+                h = ac.get("hex")
+                low_now.add(h)
+                low_streak[h] = low_streak.get(h, 0) + 1
+                if low_streak[h] == LOW_PASS_READS and now - low_last.get(h, 0) > LOW_PASS_REPEAT_S:
+                    low_last[h] = now
+                    ev = low_pass_event(ac, now)
+                    append_event(ev, "low_passes.jsonl")
+                    print("alerts: low pass", ev["hex"], ev.get("flight"), ev["alt"], flush=True)
+                    try:
+                        queue_alert(ev)
+                        pending = True
+                    except (OSError, subprocess.SubprocessError) as e:
+                        print("alerts: could not queue alert:", e, flush=True)
             status = ac.get("emergency")
             code = ac.get("squawk") if ac.get("squawk") in SQUAWKS else PUSH_STATUS.get(status)
             if code is None and status in LOG_ONLY_STATUS:
@@ -204,6 +276,10 @@ def watch():
         for key in list(streak):
             if key not in seen_now:
                 del streak[key]
+        for h in list(low_streak):
+            if h not in low_now:
+                del low_streak[h]
+        low_last = {h: t for h, t in low_last.items() if now - t <= LOW_PASS_REPEAT_S}
         for key, last in list(active.items()):
             if now - last > EPISODE_GAP_S:
                 del active[key]
