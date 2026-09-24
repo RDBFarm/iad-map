@@ -40,13 +40,11 @@ written for points about 10 s apart, so it is applied to each aircraft's
 points thinned to 10 s; every logged point inside a flagged climb is dropped,
 and nothing else is thinned.
 
-Issues found in that copied code on 2026-09-24, not yet fixed in
-`publish.py` (each needs the owner's go-ahead):
+Fixed on 2026-09-24: the GA flag now requires an N-number (N then a digit),
+as `classify_airport()` does, instead of any callsign starting with "N"
+(which caught Spirit, NKS); and the two-letter airline hints (WN, VV, VM, MX),
+which could never match, were removed.
 
-- The GA flag treats *any* callsign starting with "N" as GA, while
-  `classify_airport()` requires N followed by a digit. On May 1, 2025 this
-  caught 36 airline callsigns, mostly Spirit (NKS).
-- `AIRLINE_AIRPORT` has two-letter keys (WN, VV, VM, MX) that can never
-  match, since the code compares three letters.
-- Runway headings are runway numbers (magnetic); ADS-B track is true north.
-  KIAD is listed as 19/199. Not yet checked against published true bearings.
+Still open: runway headings are runway numbers (magnetic) while ADS-B track
+is true north, and KIAD is listed as 19/199. Not yet checked against
+published true bearings; to be looked at with real traffic.

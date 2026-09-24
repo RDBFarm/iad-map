@@ -32,8 +32,8 @@ SPAN_S = 24 * 3600
 
 # ── Classification: copied unchanged from render_github.py (the script that
 # builds the May 1 map, as of the copy last modified 2026-09-03), so the live
-# map labels and filters points the same way. Known issues in it are listed
-# in the README and are NOT fixed here without the owner's go-ahead.
+# map labels and filters points the same way. Changes since copying are
+# marked with their date; open issues are listed in the README.
 # BEGIN copied from render_github.py
 AIRPORTS = {
     "KIAD": (38.9444, -77.4558, "Dulles"),
@@ -75,17 +75,18 @@ AIRLINE_AIRPORT = {
     # DCA mainline
     "EGF":"KDCA","TCF":"KDCA",
     # BWI focus carriers
-    "WN":"KBWI",
+    # (a two-letter "WN" entry was removed 2026-09-24: prefixes are compared
+    # as three letters, so it could never match)
     # Cargo
     "FDX":"KIAD","UPS":"KIAD","ABX":"KIAD",
     # Military IAD/region
     "RCH":"KIAD","SAM":"KIAD","PAT":"KIAD","CAF":"KIAD",
     "VMC":"KIAD","CFC":"KIAD",
     # Andrews AFB military
-    "VV":"KADW","VM":"KADW","CNV":"KADW","EGL":"KADW",
+    "CNV":"KADW","EGL":"KADW",  # two-letter VV, VM removed 2026-09-24 (never matched)
     "CPT":"KADW","TRF":"KADW","OSI":"KADW",
     # Quantico / Marine One
-    "HMX":"KNYG","MX":"KNYG",
+    "HMX":"KNYG",  # two-letter MX removed 2026-09-24 (never matched)
 }
 
 # These airports have NO commercial or airline service — GA only
@@ -397,9 +398,13 @@ def hour_chunk(rows, hour_start):
     [lat, lon, alt_ft, seconds_into_hour, airport_id, ac_index, gs, track, vrate]."""
     ac, ac_index, pts = [], {}, []
     for t, hexid, lat, lon, alt, gs, track, vrate, flight, actype, mlat, category in rows:
-        # render_github.py's GA test, as written there (any callsign starting
-        # with "N" counts; see README). live.html skips its own filter for these.
-        ga = 1 if (category in GA_CATEGORIES or (flight and flight[0] == "N") or not flight) else 0
+        # GA: GA category, an N-number (N then a digit), or no callsign -- the
+        # same test classify_airport() uses. render_github.py counted any
+        # callsign starting with "N", which caught Spirit (NKS); fixed
+        # 2026-09-24. live.html skips its own filter for GA points.
+        ga = 1 if (category in GA_CATEGORIES or
+                   (flight and flight[0].upper() == "N" and len(flight) > 1 and flight[1].isdigit()) or
+                   not flight) else 0
         key = (hexid, flight, actype, ga)
         if key not in ac_index:
             ac_index[key] = len(ac)
