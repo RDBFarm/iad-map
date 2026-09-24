@@ -28,6 +28,8 @@ pair was found.
 """
 import json, math, os, sqlite3, time
 
+import aircraft_lookup
+
 H_NM = 1.0
 V_FT = 500
 MIN_GS = 50
@@ -70,7 +72,8 @@ def load(db, a, b):
             continue
         seen.add((hexid, t))
         rows.append({"t": t, "hex": hexid, "lat": lat, "lon": lon, "alt": alt, "gs": gs,
-                     "track": track, "flight": flight or "", "type": actype or "",
+                     "track": track, "flight": flight or "",
+                     "type": actype or aircraft_lookup.type_for(hexid) or "",
                      "mlat": mlat, "ra": ra})
     return rows
 

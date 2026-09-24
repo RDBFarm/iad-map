@@ -19,6 +19,8 @@ marked, so the log keeps everything.
 """
 import json, math, os, sqlite3, time
 
+import aircraft_lookup
+
 FARM = (39.1506, -77.4612)   # centre of the parcel polygon
 FARM_RADIUS_NM = 1.0
 PASS_GAP_S = 120
@@ -92,6 +94,7 @@ def update(db_path, events_dir, now=None):
             p["min_alt"] = min(p["min_alt"], alt)
             if flight:
                 p["flight"] = flight
+            actype = actype or aircraft_lookup.type_for(hexid)
             if actype:
                 p["type"] = actype
             if d < p["dist_nm"]:

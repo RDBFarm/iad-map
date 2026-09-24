@@ -22,6 +22,7 @@ drive isn't mounted.
 Table `positions`, one row per aircraft per read:
   t          epoch seconds of the aircraft's last message
   hex        ICAO address        flight, type, category, squawk
+             (type from readsb, else looked up by address: aircraft_lookup.py)
   lat, lon   NULL if no position; pos_t = epoch seconds of that position
              (an aircraft can send other messages without a new position)
   alt_baro   feet (pressure altitude; can be negative on the ground)
@@ -33,6 +34,8 @@ Table `positions`, one row per aircraft per read:
              JSON, if this readsb reports one (not yet confirmed on the Pi)
 """
 import json, os, sqlite3, time
+
+import aircraft_lookup
 
 AIRCRAFT_JSON = os.environ.get("IADMAP_AIRCRAFT_JSON", "/run/readsb/aircraft.json")
 DRIVE = os.environ.get("IADMAP_DRIVE", "/mnt/flightdata")
@@ -79,7 +82,8 @@ def rows_from(data, last_msg):
         has_pos = ac.get("lat") is not None and ac.get("lon") is not None
         out.append((
             t, ac.get("hex", ""), (ac.get("flight") or "").strip() or None,
-            ac.get("t"), ac.get("category"), ac.get("squawk"),
+            ac.get("t") or aircraft_lookup.type_for(ac.get("hex")),
+            ac.get("category"), ac.get("squawk"),
             ac.get("lat") if has_pos else None, ac.get("lon") if has_pos else None,
             round(now - ac.get("seen_pos", 0), 1) if has_pos else None,
             alt if isinstance(alt, (int, float)) else None, 1 if alt == "ground" else 0,
