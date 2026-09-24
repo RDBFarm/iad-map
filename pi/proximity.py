@@ -4,8 +4,16 @@
 Works through flights.db in 15-minute slices from where it last stopped
 (state in events/proximity_state.json), at every range the receiver hears.
 Two airborne aircraft (not on the ground, 50 kt or more) whose positions,
-taken within 2 s of each other, are less than H_NM apart horizontally AND
-V_FT apart vertically are "close". Detections of the same pair less than
+taken within 2 s of each other, are less than V_FT apart vertically and
+closer horizontally than the distance they would close in TAU_S seconds at
+their speed relative to each other -- kept between MIN_NM and MAX_NM -- are "close". So the
+limit scales with speed, as the owner asked (2026-09-24): two jets head-on
+(~500 kt closing) count within 1.0 nm, two light planes head-on (~200 kt)
+within 0.55 nm, an overtake or a formation (little closing speed) only
+within 0.15 nm. The floor allows for position error (MLAT especially); the
+cap keeps fast traffic at normal separation out. Closing speed comes from
+each aircraft's ground speed and track; if a track is missing, the two
+speeds are added (the head-on worst case). Detections of the same pair less than
 60 s apart form one event; each event is appended, once it has ended, to
 events/close_approaches.jsonl with its closest point.
 
@@ -30,7 +38,9 @@ import json, math, os, sqlite3, time
 
 import aircraft_lookup
 
-H_NM = 1.0
+TAU_S = 10
+MIN_NM = 0.15
+MAX_NM = 1.0
 V_FT = 500
 MIN_GS = 50
 PAIR_DT_S = 2
@@ -78,8 +88,26 @@ def load(db, a, b):
     return rows
 
 
+def closing_kt(p, q):
+    """Their speed relative to each other: how fast they would meet if their
+    paths crossed. Not the rate the distance is shrinking -- that is zero at
+    the closest point of every pass, which is exactly where it's measured."""
+    if p["track"] is None or q["track"] is None:
+        return p["gs"] + q["gs"]
+    def vel(x):
+        t = math.radians(x["track"])
+        return x["gs"] * math.sin(t), x["gs"] * math.cos(t)   # east, north (kt)
+    (pe, pn), (qe, qn) = vel(p), vel(q)
+    return math.hypot(qe - pe, qn - pn)
+
+
+def limit_nm(closing):
+    return min(MAX_NM, max(MIN_NM, max(closing, 0) * TAU_S / 3600))
+
+
 def close_pairs(rows):
-    """Yield (p, q, h_nm, v_ft) for close pairs taken within PAIR_DT_S."""
+    """Yield (p, q, h_nm, v_ft, closing_kt, limit_nm) for close pairs taken
+    within PAIR_DT_S."""
     cells = {}
     for p in rows:
         key = (int(p["t"] // PAIR_DT_S), int(p["lat"] / 0.05), int(p["lon"] / 0.05))
@@ -98,8 +126,12 @@ def close_pairs(rows):
                             if abs(p["t"] - q["t"]) > PAIR_DT_S or abs(p["alt"] - q["alt"]) >= V_FT:
                                 continue
                             h = dist_nm(p["lat"], p["lon"], q["lat"], q["lon"])
-                            if h < H_NM:
-                                yield p, q, h, abs(p["alt"] - q["alt"])
+                            if h >= MAX_NM:
+                                continue
+                            c = closing_kt(p, q)
+                            lim = limit_nm(c)
+                            if h < lim:
+                                yield p, q, h, abs(p["alt"] - q["alt"]), c, lim
 
 
 def side(p):
@@ -120,6 +152,7 @@ def finish(ep):
         flags.append("tcas")
     return {"start": int(ep["start"]), "end": int(ep["end"]), "cpa_t": int(ep["cpa_t"]),
             "h_nm": round(ep["h_nm"], 2), "v_ft": int(ep["v_ft"]),
+            "closing_kt": round(ep.get("closing_kt", 0)), "limit_nm": round(ep.get("limit_nm", MAX_NM), 2),
             "a": ep["a"], "b": ep["b"], "flags": flags}
 
 
@@ -146,17 +179,18 @@ def update(db_path, events_dir, now=None):
                     state["last_ra"][p["hex"]] = p["t"]
                     tf.write(json.dumps({"t": int(p["t"]), **side(p), "acas_ra": json.loads(p["ra"])},
                                         separators=(",", ":")) + "\n")
-        for p, q, h, v in close_pairs(rows):
+        for p, q, h, v, c, lim in close_pairs(rows):
             key = "|".join(sorted((p["hex"], q["hex"])))
             t = min(p["t"], q["t"])
             ep = state["open"].get(key)
             if ep is None:
                 ep = state["open"][key] = {"start": t, "end": t, "cpa_t": t, "h_nm": h, "v_ft": v,
+                                           "closing_kt": c, "limit_nm": lim,
                                            "a": side(p), "b": side(q), "near_airport": False,
                                            "low": True, "mlat": False, "tcas": False}
             ep["start"], ep["end"] = min(ep["start"], t), max(ep["end"], t)
             if h < ep["h_nm"]:
-                ep.update(cpa_t=t, h_nm=h, v_ft=v, a=side(p), b=side(q))
+                ep.update(cpa_t=t, h_nm=h, v_ft=v, closing_kt=c, limit_nm=lim, a=side(p), b=side(q))
             zone = airport_zone(p)
             ep["near_airport"] = ep["near_airport"] or (zone is not None and zone == airport_zone(q))
             ep["low"] = ep["low"] and p["alt"] < 2000 and q["alt"] < 2000
