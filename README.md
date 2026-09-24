@@ -46,6 +46,10 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
   fixed-wing, by ICAO type in `aircraft_types.json`, from tar1090-db) are left
   out of all three; helicopters, jets and unknown types stay in.
 
+- `aircraft_lookup.py` supplies aircraft types, which readsb on this image
+  doesn't: it looks each ICAO address up in tar1090's aircraft database,
+  kept on the drive and refreshed monthly.
+
 `live.html` reads those files from raw.githubusercontent.com, and on its
 5-minute refresh fetches only the hour files that changed. GitHub Pages is not
 rebuilt. Install or update on the Pi with

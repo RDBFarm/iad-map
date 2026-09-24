@@ -20,6 +20,7 @@ fetches from raw.githubusercontent.com, so GitHub Pages is not rebuilt.
 """
 import hashlib, json, math, os, sqlite3, subprocess, sys, time, urllib.request
 
+import aircraft_lookup
 import farm
 import proximity
 
@@ -346,7 +347,8 @@ def load_points(start, end):
         seen.add(key)
         rows.append([int(t), hexid, round(lat, 5), round(lon, 5), int(alt),
                      None if gs is None else round(gs), None if track is None else round(track),
-                     vrate, flight or "", actype or "", mlat, category or ""])
+                     vrate, flight or "", actype or aircraft_lookup.type_for(hexid) or "",
+                     mlat, category or ""])
     db.close()
     return rows
 

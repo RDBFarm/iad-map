@@ -29,7 +29,7 @@ mkdir -p "$HOME_DIR" "$DATA_DIR" /opt/iad-map
 chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR" "$DATA_DIR"
 
 echo "== Downloading the programs"
-for f in collector.py publish.py proximity.py farm.py alerts.py aircraft_types.json; do
+for f in collector.py publish.py proximity.py farm.py alerts.py aircraft_lookup.py aircraft_types.json; do
   curl -fsSL "$SRC/$f" -o "/opt/iad-map/$f"
 done
 chmod 755 /opt/iad-map/*.py; chmod 644 /opt/iad-map/aircraft_types.json
@@ -93,9 +93,39 @@ Persistent=true
 WantedBy=timers.target
 UNIT
 
+cat > /etc/systemd/system/iad-map-aircraft-db.service <<UNIT
+[Unit]
+Description=IAD map: refresh the aircraft type lookup (tar1090-db)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/flightdata
+
+[Service]
+Type=oneshot
+User=$USER_NAME
+ExecStart=/usr/bin/python3 /opt/iad-map/aircraft_lookup.py --build
+UNIT
+
+cat > /etc/systemd/system/iad-map-aircraft-db.timer <<UNIT
+[Unit]
+Description=IAD map: refresh the aircraft type lookup monthly
+
+[Timer]
+OnCalendar=monthly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+echo "== Building the aircraft type lookup (downloads about 8 MB)"
+sudo -u "$USER_NAME" python3 /opt/iad-map/aircraft_lookup.py --build || echo "   lookup build failed; types will be missing until it succeeds"
+
 systemctl daemon-reload
-systemctl enable --now iad-map-collector.service
+systemctl enable --now iad-map-collector.service iad-map-aircraft-db.timer
 systemctl enable iad-map-publish.timer iad-map-alerts.service
+# On a re-run, restart what is already running so it picks up the new programs.
+systemctl try-restart iad-map-collector.service iad-map-alerts.service
 
 if [ ! -f "$HOME_DIR/deploy_key" ]; then
   sudo -u "$USER_NAME" ssh-keygen -q -t ed25519 -N "" -C "rdbf-adsb-pi" -f "$HOME_DIR/deploy_key"

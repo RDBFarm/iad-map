@@ -96,7 +96,7 @@ network. First result from the receiver: 291 aircraft (271 with position),
 ### Data gotchas seen in live data
 - **Negative altitudes are real** (pressure altitude): e.g. UAL1873 at −125 ft. Any ground threshold must tolerate this.
 - **Mode S–only aircraft** (altitude, no position): ~20 of 291 in the first snapshot.
-- Whether readsb on this image fills the aircraft **type** (`t`) field is unknown — without it, family search ("737") finds nothing on the live map. Check once installed.
+- **readsb on this image does not fill the aircraft type (`t`)** — 0 of 258 aircraft on 2026-09-24. `pi/aircraft_lookup.py` looks types up by ICAO address in tar1090-db (`aircraft.csv.gz`, csv branch) kept as SQLite at `/mnt/flightdata/iad-map/aircraft.db`, refreshed monthly by `iad-map-aircraft-db.timer`. Checked against May 1, 2025: found 1,817 of the 1,825 aircraft ADSBx had typed, same type for 97%. Addresses starting `~` (TIS-B, radar-derived) have no airframe and stay unknown — so they count as "not a prop" and can raise low-pass alerts.
 
 ---
 
@@ -136,7 +136,7 @@ See `README.md` for how to install. In short:
 ### Over the farm (built 09-24, not yet installed)
 - His request (09-24): an over-the-farm figure on the live map, highlight passes **under 2,000 ft**, push to phone **under 1,500 ft**, and **exclude prop planes**.
 - `pi/farm.py`: within **1 nm** of the parcel centre (39.1506, -77.4612), any altitude, airborne; one log line per pass with its closest point. Altitudes are reported pressure altitude, not height above the farm.
-- "Prop plane" = my reading, not confirmed by him: fixed-wing (L/S/A/G) with piston, turboprop or electric engines per ICAO Doc 8643 descriptors (`pi/aircraft_types.json`, from tar1090-db). Helicopters and jets stay in; **unknown types stay in** (an extra alert beats a missed one). Depends on readsb filling `t` — unconfirmed.
+- "Prop plane" = my reading, not confirmed by him: fixed-wing (L/S/A/G) with piston, turboprop or electric engines per ICAO Doc 8643 descriptors (`pi/aircraft_types.json`, from tar1090-db). Helicopters and jets stay in; **unknown types stay in** (an extra alert beats a missed one). Types come from `aircraft_lookup.py`, since readsb supplies none.
 - From the May 1, 2025 cache (≤15,000 ft only): 228 aircraft within 1 nm of the parcel that day, median 3,800 ft, lowest 1,150 ft; 112 at 3,000–3,999 ft, 103 of them southbound and descending/level, noon–7 PM with a southerly wind — consistent with the approach to Dulles's southbound runways (an inference). One day only; north-flow days will differ.
 
 ### Planned, not built

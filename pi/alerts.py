@@ -33,6 +33,7 @@ Pushes that fail (no internet) are retried every read until they succeed.
 """
 import json, math, os, subprocess, sys, time
 
+import aircraft_lookup
 import farm
 
 AIRCRAFT_JSON = os.environ.get("IADMAP_AIRCRAFT_JSON", "/run/readsb/aircraft.json")
@@ -185,7 +186,7 @@ def push_pending():
 
 def event_from(ac, code, status, now, rx):
     ev = {"t": int(now), "utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now)),
-          "hex": ac.get("hex", ""), "flight": (ac.get("flight") or "").strip(), "type": ac.get("t"),
+          "hex": ac.get("hex", ""), "flight": (ac.get("flight") or "").strip(), "type": actype(ac),
           "code": code, "emergency": status if status not in (None, "none") else None,
           "squawk": ac.get("squawk"), "lat": ac.get("lat"), "lon": ac.get("lon"),
           "alt": ac.get("alt_baro"), "gs": ac.get("gs"), "track": ac.get("track"),
@@ -193,6 +194,10 @@ def event_from(ac, code, status, now, rx):
     if rx[0] is not None and ev["lat"] is not None:
         ev["dist_nm"], ev["bearing"] = [round(v, 1) for v in dist_bearing(rx[0], rx[1], ev["lat"], ev["lon"])]
     return ev
+
+
+def actype(ac):
+    return ac.get("t") or aircraft_lookup.type_for(ac.get("hex"))
 
 
 def low_pass_candidate(ac):
@@ -203,14 +208,14 @@ def low_pass_candidate(ac):
         return False
     if farm.dist_nm(ac["lat"], ac["lon"]) > farm.FARM_RADIUS_NM:
         return False
-    return farm.is_prop(ac.get("t")) is not True
+    return farm.is_prop(actype(ac)) is not True
 
 
 def low_pass_event(ac, now):
     return {"kind": "low_pass", "t": int(now),
             "utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now)),
-            "hex": ac.get("hex", ""), "flight": (ac.get("flight") or "").strip(), "type": ac.get("t"),
-            "prop": farm.is_prop(ac.get("t")), "alt": ac.get("alt_baro"), "gs": ac.get("gs"),
+            "hex": ac.get("hex", ""), "flight": (ac.get("flight") or "").strip(), "type": actype(ac),
+            "prop": farm.is_prop(actype(ac)), "alt": ac.get("alt_baro"), "gs": ac.get("gs"),
             "track": ac.get("track"), "lat": ac.get("lat"), "lon": ac.get("lon"),
             "dist_nm": round(farm.dist_nm(ac["lat"], ac["lon"]), 2),
             "mlat": 1 if "lat" in (ac.get("mlat") or []) else 0}
