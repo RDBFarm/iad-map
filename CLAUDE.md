@@ -129,6 +129,12 @@ See `README.md` for how to install. In short:
 - Whether this readsb reports TCAS advisories (`acas_ra`) is unconfirmed.
 - At phone width the live map's panels overlap (inherited layout, worse with the Events list). Not fixed.
 
+### Over the farm (built 09-24, not yet installed)
+- His request (09-24): an over-the-farm figure on the live map, highlight passes **under 2,000 ft**, push to phone **under 1,500 ft**, and **exclude prop planes**.
+- `pi/farm.py`: within **1 nm** of the parcel centre (39.1506, -77.4612), any altitude, airborne; one log line per pass with its closest point. Altitudes are reported pressure altitude, not height above the farm.
+- "Prop plane" = my reading, not confirmed by him: fixed-wing (L/S/A/G) with piston, turboprop or electric engines per ICAO Doc 8643 descriptors (`pi/aircraft_types.json`, from tar1090-db). Helicopters and jets stay in; **unknown types stay in** (an extra alert beats a missed one). Depends on readsb filling `t` — unconfirmed.
+- From the May 1, 2025 cache (≤15,000 ft only): 228 aircraft within 1 nm of the parcel that day, median 3,800 ft, lowest 1,150 ft; 112 at 3,000–3,999 ft, 103 of them southbound and descending/level, noon–7 PM with a southerly wind — consistent with the approach to Dulles's southbound runways (an inference). One day only; north-flow days will differ.
+
 ### Planned, not built
 - **Weather radar overlay** — historical mode via IEM WMS-T NEXRAD (round the slider's UTC time to 5 min); live mode via RainViewer current tiles. Both as transparent overlays behind the dots.
 - **Layering live tracks on the heat map** was the original idea; the live map is a separate page instead, and the historical map is frozen.

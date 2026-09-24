@@ -29,10 +29,10 @@ mkdir -p "$HOME_DIR" "$DATA_DIR" /opt/iad-map
 chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR" "$DATA_DIR"
 
 echo "== Downloading the programs"
-for f in collector.py publish.py proximity.py alerts.py; do
+for f in collector.py publish.py proximity.py farm.py alerts.py aircraft_types.json; do
   curl -fsSL "$SRC/$f" -o "/opt/iad-map/$f"
 done
-chmod 755 /opt/iad-map/*.py
+chmod 755 /opt/iad-map/*.py; chmod 644 /opt/iad-map/aircraft_types.json
 
 echo "== Setting up the services"
 cat > /etc/systemd/system/iad-map-collector.service <<UNIT
