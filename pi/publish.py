@@ -23,6 +23,7 @@ import hashlib, json, math, os, sqlite3, subprocess, sys, time, urllib.request
 import aircraft_lookup
 import farm
 import proximity
+import tracks
 
 DB_PATH = os.environ.get("IADMAP_DB", "/mnt/flightdata/iad-map/flights.db")
 WORK_DIR = os.environ.get("IADMAP_PUBLISH_DIR", "/mnt/flightdata/iad-map/publish")
@@ -444,6 +445,17 @@ def build(now):
                           separators=(",", ":")).encode()
         files[name] = body
         chunks.append({"name": name, "hash": hashlib.sha1(body).hexdigest()[:12]})
+    # Whole recorded tracks, every altitude and range, for drawing a selected
+    # flight's full path (tracks.py). Failure here never stops the map.
+    track_chunks = []
+    try:
+        if os.path.exists(DB_PATH):
+            tfiles = tracks.build(DB_PATH, WORK_DIR, start, end, aircraft_lookup.type_for)
+            for name in sorted(tfiles):
+                files[name] = tfiles[name]
+                track_chunks.append({"name": name, "hash": hashlib.sha1(tfiles[name]).hexdigest()[:12]})
+    except Exception as e:
+        print("publish: track files failed:", e, flush=True)
     window = [r for r in raw if r[0] >= start]
     heard = [r for r in logged if r[0] >= start]
     mlat_ac = {r[1] for r in heard if r[10]}
@@ -474,6 +486,7 @@ def build(now):
             "passes": proximity.recent(EVENTS_DIR, "farm_passes.jsonl", start),
         },
         "chunks": chunks,
+        "tracks": track_chunks,
     }
     return index, files
 
@@ -493,10 +506,11 @@ def git(*args, env=None):
 
 
 def write_tree(index, files):
-    os.makedirs(os.path.join(WORK_DIR, "h"), exist_ok=True)
-    for name in os.listdir(os.path.join(WORK_DIR, "h")):
-        if "h/" + name not in files:
-            os.remove(os.path.join(WORK_DIR, "h", name))
+    for sub in ("h", "t"):
+        os.makedirs(os.path.join(WORK_DIR, sub), exist_ok=True)
+        for name in os.listdir(os.path.join(WORK_DIR, sub)):
+            if f"{sub}/{name}" not in files:
+                os.remove(os.path.join(WORK_DIR, sub, name))
     for name, body in files.items():
         path = os.path.join(WORK_DIR, name)
         try:
