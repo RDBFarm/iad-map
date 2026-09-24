@@ -320,7 +320,19 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-let ALL_PTS = [];   // filled by loadData() from the Pi's hour files
+// Points are held as typed-array columns, not one JS array per point: at
+// 2-second logging a day is ~800,000 points, which as arrays took ~220 MB and
+// risks the iOS memory limit that crashed the May 1 map. getPt(i) builds the
+// familiar array form for the few thousand points on screen.
+let PTS = null;      // {n, lat, lon, alt, tmin, ap, ac, gs, track, vrate}
+const ACS = [];      // aircraft table: [label, type, ga]; PTS.ac indexes it
+const AC_INDEX = new Map();
+function getPt(i) {
+  const a = ACS[PTS.ac[i]], nz = v => Number.isNaN(v) ? null : v;
+  const alt = PTS.alt[i];
+  return [PTS.lat[i], PTS.lon[i], Math.max(0, Math.min(1, 1 - alt / 15000)), PTS.tmin[i],
+          PTS.ap[i], a[0], a[1], nz(PTS.gs[i]), alt, nz(PTS.track[i]), nz(PTS.vrate[i]), a[2]];
+}
 let WX = [];
 let META = null;
 let SPAN = 1440;     // minutes on the timeline
@@ -430,29 +442,31 @@ function doSearch(query) {
   }
 
   // Check if query matches raw type codes
-  ALL_PTS.forEach(p => {
-    const rawType = (p[6] || '').toUpperCase();
-    const flight  = (p[5] || '').toUpperCase();
+  ACS.forEach(a => {
+    const rawType = (a[1] || '').toUpperCase();
+    const flight  = (a[0] || '').toUpperCase();
     if (rawType === query || rawType.includes(query)) highlightTypes.add(rawType);
     if (flight  === query || flight.includes(query))  highlightFlights.add(flight);
   });
 
-  // Build result list — unique flights matching, sorted by time
+  // Build result list — unique flights matching, first appearance, sorted by time
   const seen = new Set();
   const results = [];
-  ALL_PTS.forEach(p => {
-    if (!matchesSearch(p)) return;
-    const key = p[5] + ':' + p[6];
-    if (seen.has(key)) return;
+  const hit = ACS.map(a => matchesSearch([0,0,0,0,0,a[0],a[1]]));
+  for (let i = 0; PTS && i < PTS.n; i++) {
+    const a = ACS[PTS.ac[i]];
+    if (!hit[PTS.ac[i]]) continue;
+    const key = a[0] + ':' + a[1];
+    if (seen.has(key)) continue;
     seen.add(key);
     results.push({
-      flight:  p[5] || '—',
-      rawType: p[6] || '',
-      dispType: getDisplayType(p[6]),
-      time:    p[3],
-      ap:      p[4]
+      flight:  a[0] || '—',
+      rawType: a[1] || '',
+      dispType: getDisplayType(a[1]),
+      time:    PTS.tmin[i],
+      ap:      PTS.ap[i]
     });
-  });
+  }
   results.sort((a,b) => a.time - b.time);
 
   const AP_NAMES_S = {0:'KIAD',1:'KDCA',2:'KBWI',3:'KJYO',4:'KGAI',
@@ -493,10 +507,11 @@ function selectResult(el, utcTime, flight, rawType) {
   redraw();
 
   // Find first point for this flight to place pulse dot
-  const fp = ALL_PTS.find(p =>
-    p[3] >= utcTime - 0.5 && p[3] <= utcTime + 2 &&
-    (p[5] === flight || p[6] === rawType)
-  );
+  let fp = null;
+  for (let i = lowerBound(utcTime - 0.5); i < PTS.n && PTS.tmin[i] <= utcTime + 2; i++) {
+    const a = ACS[PTS.ac[i]];
+    if (a[0] === flight || a[1] === rawType) { fp = getPt(i); break; }
+  }
   if (fp) {
     const lp = map.latLngToContainerPoint([fp[0], fp[1]]);
     pulsePos = {lat: fp[0], lon: fp[1]};
@@ -806,14 +821,15 @@ const CanvasLayer = L.Layer.extend({
 });
 
 // Binary search helpers
-function lowerBound(arr, val) {
-  let lo=0, hi=arr.length;
-  while(lo<hi) { const mid=(lo+hi)>>1; arr[mid][3]<val ? lo=mid+1 : hi=mid; }
+function lowerBound(val) {
+  if (!PTS) return 0;
+  let lo=0, hi=PTS.n;
+  while(lo<hi) { const mid=(lo+hi)>>1; PTS.tmin[mid]<val ? lo=mid+1 : hi=mid; }
   return lo;
 }
 function isArrivalPt(p) {
-  // GA points — always show
-  if (p[5] === "GA" || p.length < 7) return true;
+  // GA points — always show (p[11]: render_github.py's GA test, set by the Pi)
+  if (p[11] || p.length < 7) return true;
   const alt      = p[8]  || 0;
   const gs       = p[7]  || 0;
   const track    = p[9]  || 0;
@@ -841,10 +857,13 @@ function isArrivalPt(p) {
 }
 
 function getPtsInRange(lo, hi) {
-  const a = lowerBound(ALL_PTS, lo);
-  const b = lowerBound(ALL_PTS, hi);
-  const slice = ALL_PTS.slice(a, b);
-  return slice.filter(p => activeAP.has(p[4]) && isArrivalPt(p));
+  const a = lowerBound(lo), b = lowerBound(hi), out = [];
+  for (let i = a; i < b; i++) {
+    if (!activeAP.has(PTS.ap[i])) continue;
+    const p = getPt(i);
+    if (isArrivalPt(p)) out.push(p);
+  }
+  return out;
 }
 
 const canvasLayer = new CanvasLayer();
@@ -1041,16 +1060,26 @@ document.getElementById('timeline').addEventListener('input', function() {
 const DATA_BASE = (new URLSearchParams(location.search).get('data') ||
   'https://raw.githubusercontent.com/RDBFarm/iad-map/live-data/').replace(/\/?$/, '/');
 const STALE_MIN = 45;
-const chunkCache = {};   // name → {hash, rows}; rows keep epoch seconds at index 11
+const chunkCache = {};   // name → {hash, start, cols}
 
-function expandChunk(c) {
-  // [lat, lon, alt, sec, ap, ac, gs, track, vrate] → the page's point shape:
-  // [lat, lon, intensity, minute, ap, flight, type, gs, alt, track, vrate, epoch]
-  return c.pts.map(q => {
-    const a = c.ac[q[5]];
-    return [q[0], q[1], Math.max(0, Math.min(1, 1 - q[2] / 15000)), 0, q[4],
-            a[1] || a[0].toUpperCase(), a[2], q[6], q[2], q[7], q[8], c.start + q[3]];
+function chunkColumns(c) {
+  // [lat, lon, alt, sec, ap, ac, gs, track, vrate] rows → typed columns.
+  // Aircraft entries [hex, flight, type, ga] map into the shared ACS table.
+  const n = c.pts.length, num = v => v === null || v === undefined ? NaN : v;
+  const acMap = c.ac.map(a => {
+    const label = a[1] || a[0].toUpperCase(), key = label + '|' + a[2] + '|' + (a[3] ? 1 : 0);
+    if (!AC_INDEX.has(key)) { AC_INDEX.set(key, ACS.length); ACS.push([label, a[2], !!a[3]]); }
+    return AC_INDEX.get(key);
   });
+  const col = {n, lat: new Float32Array(n), lon: new Float32Array(n), alt: new Float32Array(n),
+    sec: new Int32Array(n), ap: new Uint8Array(n), ac: new Uint32Array(n),
+    gs: new Float32Array(n), track: new Float32Array(n), vrate: new Float32Array(n)};
+  c.pts.forEach((q, i) => {
+    col.lat[i] = q[0]; col.lon[i] = q[1]; col.alt[i] = q[2]; col.sec[i] = q[3];
+    col.ap[i] = q[4]; col.ac[i] = acMap[q[5]];
+    col.gs[i] = num(q[6]); col.track[i] = num(q[7]); col.vrate[i] = num(q[8]);
+  });
+  return col;
 }
 
 async function loadData() {
@@ -1063,28 +1092,40 @@ async function loadData() {
       if (chunkCache[c.name] && chunkCache[c.name].hash === c.hash) return;
       const rc = await fetch(DATA_BASE + c.name + '?h=' + c.hash);
       if (!rc.ok) throw new Error(c.name + ' HTTP ' + rc.status);
-      chunkCache[c.name] = {hash: c.hash, rows: expandChunk(await rc.json())};
+      const body = await rc.json();
+      chunkCache[c.name] = {hash: c.hash, start: body.start, cols: chunkColumns(body)};
     }));
   } catch (e) {
     document.getElementById('updated').textContent = META ? 'update failed, showing ' + shortTime(SPAN) : 'no data yet (' + e.message + ')';
     return;
   }
-  const names = new Set(idx.chunks.map(c => c.name));
-  Object.keys(chunkCache).forEach(n => { if (!names.has(n)) delete chunkCache[n]; });
+  const current = new Set(idx.chunks.map(c => c.name));
+  Object.keys(chunkCache).forEach(n => { if (!current.has(n)) delete chunkCache[n]; });
 
   const atEdge = !META || _curMin >= SPAN - 1;
   const shift = META ? (META.start - idx.meta.start) / 60 : 0;
   META = idx.meta; WX = idx.wx || [];
   SPAN = META.span_min;
-  const pts = [];
-  idx.chunks.map(c => c.name).sort().forEach(n => {
-    for (const p of chunkCache[n].rows) {
-      if (p[11] < META.start || p[11] > META.end) continue;
-      p[3] = (p[11] - META.start) / 60;
-      pts.push(p);
+  // Concatenate the hour files (sorted by name = by time) into one set of
+  // columns, keeping only points inside the 24-hour window.
+  const names = [...idx.chunks.map(c => c.name)].sort();
+  let n = 0;
+  names.forEach(nm => { n += chunkCache[nm].cols.n; });
+  const all = {n: 0, lat: new Float32Array(n), lon: new Float32Array(n), alt: new Float32Array(n),
+    tmin: new Float32Array(n), ap: new Uint8Array(n), ac: new Uint32Array(n),
+    gs: new Float32Array(n), track: new Float32Array(n), vrate: new Float32Array(n)};
+  names.forEach(nm => {
+    const {start, cols} = chunkCache[nm];
+    for (let i = 0; i < cols.n; i++) {
+      const epoch = start + cols.sec[i];
+      if (epoch < META.start || epoch > META.end) continue;
+      const k = all.n++;
+      all.lat[k] = cols.lat[i]; all.lon[k] = cols.lon[i]; all.alt[k] = cols.alt[i];
+      all.tmin[k] = (epoch - META.start) / 60; all.ap[k] = cols.ap[i]; all.ac[k] = cols.ac[i];
+      all.gs[k] = cols.gs[i]; all.track[k] = cols.track[i]; all.vrate[k] = cols.vrate[i];
     }
   });
-  ALL_PTS = pts;
+  PTS = all;
   _curMin = atEdge ? SPAN : Math.max(0, Math.min(SPAN, _curMin + shift));
   document.getElementById('timeline').max = SPAN;
   document.getElementById('tl-start').textContent = shortTime(0);
