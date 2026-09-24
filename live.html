@@ -551,6 +551,7 @@ function selectResult(el, utcTime, flight, rawType) {
     pulsePos = {lat: fp[0], lon: fp[1]};
     startPulse();
   }
+  showTracks([flight]);
 }
 
 // Dedicated pulse canvas — sits above the main canvas, never conflicts
@@ -618,6 +619,7 @@ function stopPulse() {
 }
 
 function clearSearch() {
+  clearTracks();
   searchActive     = false;
   highlightTypes   = null;
   highlightFlights = null;
@@ -1176,7 +1178,9 @@ async function loadData() {
     (age > STALE_MIN ? ' — ' + Math.round(age / 60 * 10) / 10 + ' h ago, the Pi may be offline' : '');
   upd.style.color = age > STALE_MIN ? '#ff9f40' : '';
   drawFarm(idx.farm);
-  drawEvents(Object.assign({}, idx.events, {farm_passes: idx.farm ? idx.farm.passes : []}));
+  TRACK_LIST = idx.tracks || [];
+  LAST_EVENTS = Object.assign({}, idx.events, {farm_passes: idx.farm ? idx.farm.passes : []});
+  drawEvents(LAST_EVENTS);
   if (searchActive) doSearch(document.getElementById('search-input').value); else redraw();
 }
 drawLegend();
@@ -1360,7 +1364,15 @@ function eventCardHtml(it) {
   return '';
 }
 function openEventCard(it) {
-  document.getElementById('ev-body').innerHTML = eventCardHtml(it);
+  const key = eventKey(it), isHidden = hiddenEvents.has(key);
+  document.getElementById('ev-body').innerHTML = eventCardHtml(it) +
+    `<div class="note"><button class="btn" id="ev-hide">${isHidden ? 'Show on the map again' : 'Hide from the map'}</button></div>`;
+  document.getElementById('ev-hide').onclick = () => {
+    if (isHidden) hiddenEvents.delete(key); else hiddenEvents.add(key);
+    saveHidden();
+    closeEventCard();
+    drawEvents(LAST_EVENTS);
+  };
   document.getElementById('ev-card').hidden = false;
   // highlight the aircraft involved, the way a search does
   const e = it.raw || {};
@@ -1370,6 +1382,7 @@ function openEventCard(it) {
   highlightTypes = new Set();
   highlightFlights = new Set(who);
   document.getElementById('search-clear').style.display = 'block';
+  showTracks(who);
 }
 function closeEventCard() {
   document.getElementById('ev-card').hidden = true;
@@ -1378,7 +1391,9 @@ function closeEventCard() {
 
 function drawEvents(ev) {
   eventLayer.clearLayers();
-  const {items, hidden} = eventItems(ev || {});
+  const all = eventItems(ev || {}), hidden = all.hidden;
+  const dismissed = all.items.filter(it => hiddenEvents.has(eventKey(it)));
+  const items = showDismissed ? all.items : all.items.filter(it => !hiddenEvents.has(eventKey(it)));
   const list = document.getElementById('events-list');
   list.innerHTML = '';
   items.forEach(it => {
@@ -1396,9 +1411,81 @@ function drawEvents(ev) {
       .on('click', () => jumpToEvent(it))
       .addTo(eventLayer);
   });
-  document.getElementById('events-note').textContent =
-    (items.length ? '' : 'None. ') +
-    (hidden ? hidden + ' close approach' + (hidden > 1 ? 'es' : '') + ' at airports, in formation or low-level not shown.' : '');
+  const note = document.getElementById('events-note');
+  note.textContent = (items.length ? '' : 'None. ') +
+    (hidden ? hidden + ' close approach' + (hidden > 1 ? 'es' : '') + ' at airports, in formation or low-level not shown. ' : '');
+  if (dismissed.length) {
+    const a = document.createElement('a');
+    a.href = '#'; a.style.color = '#7ec8e3';
+    a.textContent = showDismissed ? 'Hide the ' + dismissed.length + ' you hid' : 'Show ' + dismissed.length + ' hidden';
+    a.onclick = ev2 => { ev2.preventDefault(); showDismissed = !showDismissed; drawEvents(LAST_EVENTS); };
+    note.appendChild(a);
+  }
+}
+
+// ── Hidden events: per browser, remembered between visits ─────────────────
+function eventKey(it) {
+  const e = it.raw || {};
+  const who = it.kind === 'close' ? [e.a && e.a.hex, e.b && e.b.hex].sort().join('+') : e.hex;
+  return it.kind + ':' + Math.round(it.t) + ':' + who;
+}
+let hiddenEvents = new Set(), showDismissed = false, LAST_EVENTS = null;
+try { hiddenEvents = new Set(JSON.parse(localStorage.getItem('iadmap.hiddenEvents') || '[]')); } catch (e) {}
+function saveHidden() {
+  try { localStorage.setItem('iadmap.hiddenEvents', JSON.stringify([...hiddenEvents].slice(-500))); } catch (e) {}
+}
+
+// ── Full recorded tracks for a selected flight (every altitude and range) ──
+// From the Pi's t/<hour>.json files (pi/tracks.py), fetched only when a
+// flight is first selected. Tracks are simplified for drawing: every turn,
+// every 200 ft, at least one point a minute; breaks mark reception gaps.
+let TRACK_LIST = [];
+const trackCache = {};             // name -> {hash, data}
+const trackLayer = L.layerGroup().addTo(map);
+let trackRequest = 0;
+async function loadTrackFiles() {
+  await Promise.all(TRACK_LIST.map(async c => {
+    if (trackCache[c.name] && trackCache[c.name].hash === c.hash) return;
+    const r = await fetch(DATA_BASE + c.name + '?h=' + c.hash);
+    if (r.ok) trackCache[c.name] = {hash: c.hash, data: await r.json()};
+  }));
+}
+function clearTracks() { trackRequest++; trackLayer.clearLayers(); }
+async function showTracks(labels) {
+  const want = new Set(labels.filter(Boolean).map(l => String(l).toUpperCase()));
+  const req = ++trackRequest;
+  trackLayer.clearLayers();
+  if (!want.size || !TRACK_LIST.length) return;
+  try { await loadTrackFiles(); } catch (e) { return; }
+  if (req !== trackRequest) return;          // another selection since
+  const byHex = {};
+  TRACK_LIST.map(c => c.name).sort().forEach(n => {
+    const f = trackCache[n] && trackCache[n].data;
+    if (!f) return;
+    Object.entries(f.ac).forEach(([hex, [flight, type, pts]]) => {
+      if (!want.has((flight || '').toUpperCase()) && !want.has(hex.toUpperCase())) return;
+      const t = byHex[hex] = byHex[hex] || {flight, pts: []};
+      pts.forEach(p => t.pts.push([f.start + p[0], p[1], p[2], p[3]]));
+    });
+  });
+  Object.values(byHex).forEach(t => {
+    t.pts.sort((a, b) => a[0] - b[0]);
+    const segs = [[]];
+    t.pts.forEach((p, i) => {
+      if (i && p[0] - t.pts[i - 1][0] > 90) segs.push([]);   // reception gap: break the line
+      segs[segs.length - 1].push([p[1], p[2]]);
+    });
+    segs.filter(sg => sg.length > 1).forEach(sg => {
+      L.polyline(sg, {color: '#000', weight: 5, opacity: 0.55, interactive: false}).addTo(trackLayer);
+      L.polyline(sg, {color: '#fff', weight: 2.5, opacity: 0.95, interactive: false}).addTo(trackLayer);
+    });
+    const first = t.pts[0], last = t.pts[t.pts.length - 1];
+    const lab = (p, what) => `${what} ${FMT_TIME.format(new Date(p[0] * 1000)).replace(/^0/, '')}, ${num(p[3])} ft`;
+    [[first, 'First heard'], [last, 'Last heard']].forEach(([p, what]) =>
+      L.circleMarker([p[1], p[2]], {radius: 5, color: '#000', weight: 2, fillColor: '#fff', fillOpacity: 1})
+        .bindTooltip((t.flight || '') + ' · ' + lab(p, what), {permanent: true, direction: 'top', className: 'ap-label'})
+        .addTo(trackLayer));
+  });
 }
 
 loadData();

@@ -139,6 +139,12 @@ See `README.md` for how to install. In short:
 - "Prop plane" = my reading, not confirmed by him: fixed-wing (L/S/A/G) with piston, turboprop or electric engines per ICAO Doc 8643 descriptors (`pi/aircraft_types.json`, from tar1090-db). Helicopters and jets stay in. **Unknown types: logged and shown on the map, never pushed** (his call, 09-24). Types come from `aircraft_lookup.py`, since readsb supplies none.
 - From the May 1, 2025 cache (≤15,000 ft only): 228 aircraft within 1 nm of the parcel that day, median 3,800 ft, lowest 1,150 ft; 112 at 3,000–3,999 ft, 103 of them southbound and descending/level, noon–7 PM with a southerly wind — consistent with the approach to Dulles's southbound runways (an inference). One day only; north-flow days will differ.
 
+### Map features added 09-24 (his requests)
+- **Detail card** on tapping any event: both aircraft (callsign, registration, type and name, altitude, speed, heading, GPS or MLAT, ADS-B Exchange link), geometry, place, flags.
+- **Full path of a selected flight** (search result or event) at every altitude and range, from `t/<hour>.json` built by `pi/tracks.py` (simplified for drawing; the log keeps every point). Prompted by AAL1623: its map points began at 13,450 ft (the 15,000 ft ceiling) and ended at 1,575 ft about 12 mi south of DCA, where reception from the farm runs out.
+- **Hide viewed incidents**: per browser, in localStorage; "Show N hidden" restores.
+- The **Now** button stays at now; playback stops at the live edge.
+
 ### Planned, not built
 - **Weather radar overlay** — historical mode via IEM WMS-T NEXRAD (round the slider's UTC time to 5 min); live mode via RainViewer current tiles. Both as transparent overlays behind the dots.
 - **Layering live tracks on the heat map** was the original idea; the live map is a separate page instead, and the historical map is frozen.

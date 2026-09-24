@@ -37,7 +37,9 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
   low-level and MLAT. They are close approaches, not confirmed near misses.
   TCAS resolution advisories, if this readsb reports them, go to
   `events/tcas.jsonl`. The live map marks emergencies, TCAS advisories and
-  unflagged close approaches, and lists them in the Events panel.
+  unflagged close approaches, and lists them in the Events panel. Tapping one opens a detail card; "Hide
+from the map" removes it for that browser (remembered between visits), and
+"Show N hidden" brings hidden ones back.
 
 - `farm.py` logs every aircraft passing within 1 nm of the farm parcel's
   centre, at any altitude, to `events/farm_passes.jsonl`. The live map shows
@@ -51,6 +53,12 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
 - `aircraft_lookup.py` supplies aircraft types, which readsb on this image
   doesn't: it looks each ICAO address up in tar1090's aircraft database,
   kept on the drive and refreshed monthly.
+
+- `tracks.py`, run by `publish.py`, writes `t/<hour>.json` on `live-data`:
+  every aircraft's whole recorded track, at every altitude and range,
+  simplified for drawing (every turn, every 200 ft, at least one point a
+  minute, both sides of any gap). The map draws a selected flight's full
+  path from these; the log keeps every point.
 
 `live.html` reads those files from raw.githubusercontent.com, and on its
 5-minute refresh fetches only the hour files that changed. GitHub Pages is not
