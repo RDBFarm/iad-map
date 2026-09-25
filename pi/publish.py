@@ -558,6 +558,9 @@ def enrich(index):
         x["type"] = x.get("type") or aircraft_lookup.type_for(h) or ""
         x["reg"] = x.get("reg") or aircraft_lookup.reg_for(h)
         x["type_name"] = farm.type_name(x["type"])
+        op = aircraft_lookup.operator_for(x.get("flight"))
+        if op:
+            x["operator"], x["operator_radio"] = op
         x["prop"] = farm.is_prop(x["type"]) if x.get("prop") is None else x["prop"]
     ev = index["events"]
     for e in ev["emergencies"] + ev["tcas"] + index["farm"]["passes"]:

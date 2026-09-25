@@ -13,7 +13,7 @@ small SQLite table on the USB drive.
   type_for(hex)                        the type code, or None if unknown
   reg_for(hex)                         the registration, or None
 """
-import gzip, os, sqlite3, sys, time, urllib.request
+import gzip, json, os, re, sqlite3, sys, time, urllib.request
 
 CSV_URL = "https://raw.githubusercontent.com/wiedehopf/tar1090-db/csv/aircraft.csv.gz"
 DB_PATH = os.environ.get("IADMAP_AIRCRAFT_DB", "/mnt/flightdata/iad-map/aircraft.db")
@@ -25,6 +25,26 @@ _cache = {}
 def type_for(hexid):
     """ICAO type code for an ICAO address, or None. Cached per address."""
     return _row(hexid)[1]
+
+
+_OPERATORS = None
+
+
+def operator_for(callsign):
+    """(name, radio callsign) for an airline-style callsign such as RPA5604,
+    from operators.json (tar1090-db); None if not one or not listed."""
+    global _OPERATORS
+    m = re.match(r"^([A-Z]{3})[0-9]", (callsign or "").strip().upper())
+    if not m:
+        return None
+    if _OPERATORS is None:
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "operators.json")) as f:
+                _OPERATORS = json.load(f)["operators"]
+        except (OSError, ValueError, KeyError):
+            _OPERATORS = {}
+    op = _OPERATORS.get(m.group(1))
+    return (op[0], op[2]) if op else None
 
 
 def reg_for(hexid):

@@ -24,12 +24,13 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
   hour.
 
 - `alerts.py` watches everything the receiver hears, every 2 seconds, for
-  squawk 7700, 7600 or 7500 (or the matching ADS-B emergency status). Seen on
-  3 reads in a row, it logs the event to
+  squawk 7700, 7600 or 7500. Seen on 3 reads in a row, it logs the event to
   `/mnt/flightdata/iad-map/events/emergencies.jsonl` and pushes an alert file
   to the `alerts` branch; `.github/workflows/emergency-alert.yml` then opens
   an issue mentioning @RDBFarm, which the GitHub app turns into a phone
-  notification. Medical and minimum-fuel statuses are logged, not pushed.
+  notification. An ADS-B emergency status sent with an ordinary squawk is
+  logged and shown on the map, not pushed (usually a glitch). Alerts name the
+  airline from `operators.json` (tar1090-db).
 - `proximity.py`, run by `publish.py`, logs close approaches at any range to
   `events/close_approaches.jsonl`: two airborne aircraft under 500 ft apart
   vertically and closer than the distance they'd cover towards each other in

@@ -1211,10 +1211,18 @@ function drawFarm(f) {
 
 function eventItems(ev) {
   const items = [];
-  (ev.emergencies || []).filter(e => e.pushed).forEach(e => items.push({
-    kind: 'emergency', raw: e, t: e.t, lat: e.lat, lon: e.lon,
-    label: e.code + ' ' + (e.flight || e.hex.toUpperCase()),
-    detail: e.code + (e.code === '7700' ? ' emergency' : e.code === '7600' ? ' radio failure' : ' unlawful interference')}));
+  // Pushed squawks, plus ADS-B emergency statuses sent with an ordinary
+  // squawk (logged, not pushed; the first was a glitch). Medical and
+  // minimum-fuel priorities are not shown.
+  const STATUS_SHOWN = {general: 'general emergency', nordo: 'radio failure', unlawful: 'unlawful interference'};
+  (ev.emergencies || []).forEach(e => {
+    const status = (e.code || '').startsWith('status-') ? e.code.slice(7) : null;
+    if (!e.pushed && !(status && STATUS_SHOWN[status])) return;
+    items.push({kind: 'emergency', raw: e, t: e.t, lat: e.lat, lon: e.lon,
+      label: (status ? 'status ' + status : e.code) + ' ' + (e.flight || e.hex.toUpperCase()),
+      detail: status ? 'ADS-B status "' + STATUS_SHOWN[status] + '" with ordinary squawk ' + (e.squawk || '?')
+                     : e.code + (e.code === '7700' ? ' emergency' : e.code === '7600' ? ' radio failure' : ' unlawful interference')});
+  });
   // TCAS advisories on their own are not shown (owner, 2026-09-25): the first
   // ones were airliners kept miles apart by the system doing its job. They
   // are still logged on the Pi (events/tcas.jsonl), and a close approach in
@@ -1294,6 +1302,7 @@ function aircraftBlock(x, t, heading) {
   const hex = (x.hex || '').replace('~', '');
   return `<div><h5>${esc(heading || call)}</h5>` +
     (heading ? row('Callsign', esc(call)) : '') +
+    (x.operator ? row('Airline / operator', esc(x.operator) + (x.operator_radio ? '<br>radio callsign ' + esc(x.operator_radio) : '')) : '') +
     row('Registration', esc(x.reg || '—')) +
     row('Type', esc(x.type || 'unknown') + (x.type_name ? '<br>' + esc(x.type_name) : '')) +
     row('ICAO address', esc((x.hex || '').toUpperCase())) +
@@ -1338,9 +1347,13 @@ function eventCardHtml(it) {
       `<div class="note">A close approach, not a confirmed near miss: positions can be off by a few hundred feet, more with MLAT.</div>`;
   }
   if (it.kind === 'emergency') {
+    const status = (e.code || '').startsWith('status-');
     const what = {'7700': 'general emergency', '7600': 'radio failure', '7500': 'unlawful interference (hijack)'}[e.code] || e.code;
-    return `<h4>▲ Squawk ${esc(e.code)}: ${esc(what)}</h4>` +
+    return (status
+        ? `<h4>▲ ADS-B emergency status: ${esc(e.emergency)}</h4><div class="note">Sent with an ordinary squawk (${esc(e.squawk || '?')}), so probably a glitch, not a real emergency: a crew in trouble sets the squawk code. Logged, not pushed.</div>`
+        : `<h4>▲ Squawk ${esc(e.code)}: ${esc(what)}</h4>`) +
       row('Seen', when(e.t)) +
+      row('Squawk', esc(e.squawk || 'not reported')) +
       (e.emergency ? row('ADS-B emergency status', esc(e.emergency)) : '') +
       row('Phone alert', e.pushed ? 'sent' : 'logged only') +
       whereRows(e.lat, e.lon) +
