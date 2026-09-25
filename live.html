@@ -166,6 +166,29 @@
     box-shadow:0 0 0 1.5px rgba(255,255,255,0.8); }
   .ev-icon.ev-emergency div { border-width:2.5px; font-size:0.72rem; }
   .ev-icon.ev-low div { border-style:dashed; }
+  /* small screens: keep the header inside the screen */
+  @media (max-width: 600px) {
+    #hdr { gap:8px; padding:8px 10px; }
+    #hdr .badge { display:none; }
+    #hdr .sub { display:none; }
+    #hdr .btn { padding:4px 8px; font-size:0.72rem; }
+    #hdr h1 { font-size:0.9rem; }
+  }
+  html, body { overflow-x:hidden; }
+  /* near-the-farm search */
+  #near-panel { position:absolute; top:58px; right:14px; z-index:1003; width:min(360px, calc(100% - 28px));
+    max-height:calc(100% - 200px); overflow-y:auto; background:rgba(10,10,20,0.96);
+    border:1px solid rgba(255,255,255,0.15); border-radius:10px; padding:12px 14px; font-size:0.74rem;
+    color:#dde; line-height:1.45; }
+  #near-panel h4 { font-size:0.85rem; color:#fff; margin:0 26px 8px 0; }
+  #near-form { display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
+  #near-form label { display:flex; flex-wrap:wrap; align-items:center; gap:6px; color:#aab; }
+  #near-form input { background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.2); border-radius:5px;
+    color:#eef; padding:3px 6px; font-size:0.74rem; }
+  #near-form input[type=number] { width:5.5em; }
+  #near-panel .note { color:#99a; margin:4px 0; }
+  #near-close { position:absolute; top:8px; right:10px; background:none; border:none; color:#aab;
+    font-size:1.1rem; cursor:pointer; padding:2px 6px; }
   /* event detail card */
   #ev-card { position:absolute; left:14px; bottom:138px; z-index:1002; width:min(380px, calc(100% - 28px));
     max-height:min(62vh, calc(100% - 200px)); overflow-y:auto; background:rgba(10,10,20,0.96);
@@ -211,7 +234,8 @@
     <div class="sub">Washington Dulles · last 24 hours · 50-mile radius · RDBF receiver · <span id="updated">loading…</span></div>
   </div>
   <span class="badge" id="badge-pos">— positions</span>
-  <button class="btn" id="btn-mapstyle" onclick="toggleMapStyle()" style="margin-left:auto">🌙 Night Map</button>
+  <button class="btn" id="btn-near" onclick="toggleNear()" style="margin-left:auto">📍 Near the farm</button>
+  <button class="btn" id="btn-mapstyle" onclick="toggleMapStyle()">🌙 Night Map</button>
   <span class="badge" id="badge-ac">— aircraft</span>
   <span class="badge">≤ 15,000 ft</span>
 </div>
@@ -311,6 +335,21 @@
     <span class="wx-icon">🌧</span>
     <div><div class="wx-label">Weather</div><div class="wx-val" id="wx-wx">—</div></div>
   </div>
+</div>
+
+<div id="near-panel" hidden>
+  <button id="near-close" aria-label="Close" onclick="toggleNear()">✕</button>
+  <h4>📍 Aircraft near the farm</h4>
+  <form id="near-form">
+    <label>Within <input id="near-mi" type="number" min="0.1" max="50" step="0.1" value="2"> miles of the farm</label>
+    <label>From <input id="near-from" type="datetime-local"></label>
+    <label>To <input id="near-to" type="datetime-local"></label>
+    <label>Height above your ground <input id="near-hmin" type="number" step="100" value="0"> to
+      <input id="near-hmax" type="number" step="100" value="3000"> ft</label>
+    <button class="btn" type="submit">Search</button>
+  </form>
+  <div id="near-status" class="note"></div>
+  <div id="near-results"></div>
 </div>
 
 <div id="ev-card" hidden><button id="ev-close" aria-label="Close" onclick="closeEventCard()">✕</button><div id="ev-body"></div></div>
@@ -1179,6 +1218,7 @@ async function loadData() {
   upd.style.color = age > STALE_MIN ? '#ff9f40' : '';
   drawFarm(idx.farm);
   TRACK_LIST = idx.tracks || [];
+  FARM_INFO = idx.farm || null;
   LAST_EVENTS = Object.assign({}, idx.events, {farm_passes: idx.farm ? idx.farm.passes : []});
   drawEvents(LAST_EVENTS);
   if (searchActive) doSearch(document.getElementById('search-input').value); else redraw();
@@ -1502,6 +1542,115 @@ async function showTracks(labels) {
         .addTo(trackLayer));
   });
 }
+
+// ── Near-the-farm search ───────────────────────────────────────────────────
+// Every aircraft whose recorded path came within N miles of the farm centre
+// in a time window, within a height band above the farm's ground. Uses the
+// full track files (every altitude, departures included), checking each
+// straight segment between recorded points, so a fast crossing between two
+// points still counts. Heights: reported altitude corrected with KIAD's
+// altimeter at the time, minus the farm's ground height (published by the Pi).
+let FARM_INFO = null;
+function toggleNear() {
+  const p = document.getElementById('near-panel');
+  p.hidden = !p.hidden;
+  if (!p.hidden && META && !document.getElementById('near-from').value) {
+    const local = t => { const d = new Date(t * 1000); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+                         return d.toISOString().slice(0, 16); };
+    document.getElementById('near-from').value = local(META.end - 24 * 3600);
+    document.getElementById('near-to').value = local(META.end);
+  }
+}
+function altimAt(t) {
+  let best = null;
+  (WX || []).forEach(w => { if (w.altim_hpa && w.epoch && w.epoch <= t + 60) best = w; });
+  return best && t - best.epoch < 3 * 3600 ? best.altim_hpa : null;
+}
+function aglFt(alt, t) {
+  if (alt == null) return null;
+  const a = altimAt(t), g = FARM_INFO && FARM_INFO.ground_ft != null ? FARM_INFO.ground_ft : 380;
+  return Math.round(alt + (a ? (a * 0.02953 - 29.92) * 1000 : 0) - g);
+}
+async function runNear(ev) {
+  if (ev) ev.preventDefault();
+  const status = document.getElementById('near-status'), out = document.getElementById('near-results');
+  const mi = +document.getElementById('near-mi').value || 2;
+  const t0 = new Date(document.getElementById('near-from').value).getTime() / 1000;
+  const t1 = new Date(document.getElementById('near-to').value).getTime() / 1000;
+  const hmin = +document.getElementById('near-hmin').value, hmax = +document.getElementById('near-hmax').value;
+  if (!FARM_CENTER || !(t1 > t0)) { status.textContent = 'Check the times: "To" must be after "From".'; return; }
+  const names = TRACK_LIST.filter(c => {
+    const m = c.name.match(/(\d{4})(\d{2})(\d{2})(\d{2})/);
+    const h = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4]) / 1000;
+    return h + 3600 > t0 && h <= t1;
+  });
+  if (!names.length) { status.textContent = 'No recorded paths cover that time.'; out.innerHTML = ''; return; }
+  status.textContent = 'Loading paths…';
+  await Promise.all(names.map(async c => {
+    if (trackCache[c.name] && trackCache[c.name].hash === c.hash) return;
+    const r = await fetch(DATA_BASE + c.name + '?h=' + c.hash);
+    if (r.ok) trackCache[c.name] = {hash: c.hash, data: await r.json()};
+  }));
+  const [lat0, lon0] = FARM_CENTER, kx = Math.cos(lat0 * Math.PI / 180) * 69.172, ky = 69.05;
+  const byHex = {};
+  names.map(c => c.name).sort().forEach(n => {
+    const f = trackCache[n] && trackCache[n].data;
+    if (!f) return;
+    Object.entries(f.ac).forEach(([hex, [flight, type, pts]]) => {
+      const a = byHex[hex] = byHex[hex] || {flight, type, pts: []};
+      if (flight) a.flight = flight;
+      if (type) a.type = type;
+      pts.forEach(p => a.pts.push([f.start + p[0], p[1], p[2], p[3]]));
+    });
+  });
+  const hits = [];
+  Object.entries(byHex).forEach(([hex, a]) => {
+    a.pts.sort((x, y) => x[0] - y[0]);
+    let pass = null;
+    const flush = () => { if (pass) hits.push(pass); pass = null; };
+    for (let i = 0; i < a.pts.length; i++) {
+      const p = a.pts[i], q = a.pts[i + 1] || p;
+      const seg = q !== p && q[0] - p[0] <= 120 ? [p, q] : [p, p];
+      const [A, B] = seg;
+      if (B[0] < t0 || A[0] > t1) continue;
+      const ax = (A[2] - lon0) * kx, ay = (A[1] - lat0) * ky, bx = (B[2] - lon0) * kx, by = (B[1] - lat0) * ky;
+      const dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
+      const u = L2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2)) : 0;
+      const d = Math.hypot(ax + u * dx, ay + u * dy);
+      const t = A[0] + u * (B[0] - A[0]), alt = A[3] == null ? null : A[3] + u * ((B[3] == null ? A[3] : B[3]) - A[3]);
+      const h = aglFt(alt, t);
+      if (d <= mi && t >= t0 && t <= t1 && h != null && h >= hmin && h <= hmax) {
+        if (pass && t - pass.last > 600) flush();
+        if (!pass) pass = {hex, flight: a.flight, type: a.type, d, t, h, alt, last: t};
+        else if (d < pass.d) Object.assign(pass, {d, t, h, alt});
+        pass.last = t;
+      }
+    }
+    flush();
+  });
+  hits.sort((x, y) => x.t - y.t);
+  status.textContent = hits.length + ' aircraft pass' + (hits.length === 1 ? '' : 'es') + ' within ' + mi +
+    ' mi, ' + num(hmin) + '–' + num(hmax) + ' ft above the ground' +
+    (FARM_INFO && FARM_INFO.ground_basis === 'USGS' ? '' : ' (ground height approximate)') + '. Tap one to see its path.';
+  out.innerHTML = '';
+  hits.slice(0, 300).forEach(x => {
+    const r = document.createElement('div');
+    r.className = 'search-result';
+    const who = x.flight || x.hex.toUpperCase();
+    r.innerHTML = `<span><span class="sr-flight">${esc(who)}</span><span class="sr-type"> · ${esc(x.type || '?')} · ${num(x.d, 1)} mi · ${num(x.h)} ft</span></span>
+      <span class="sr-time">${esc(FMT_TIME.format(new Date(x.t * 1000)).replace(/^0/, '') + ' ' + FMT_DAY.format(new Date(x.t * 1000)))}</span>`;
+    r.onclick = () => {
+      if (playing) togglePlay();
+      _curMin = Math.max(0, Math.min(SPAN, (x.t - META.start) / 60 + 1)); redraw();
+      searchActive = true; highlightTypes = new Set(); highlightFlights = new Set([who]);
+      document.getElementById('search-clear').style.display = 'block';
+      showTracks([who, x.hex]);
+    };
+    out.appendChild(r);
+  });
+  if (hits.length > 300) out.insertAdjacentHTML('beforeend', '<div class="note">Showing the first 300; narrow the search to see the rest.</div>');
+}
+document.getElementById('near-form').addEventListener('submit', runNear);
 
 loadData();
 setInterval(loadData, 5 * 60 * 1000);

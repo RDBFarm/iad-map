@@ -202,6 +202,8 @@ See `README.md` for how to install. In short:
 ### Map features added 09-24 (his requests)
 - **Detail card** on tapping any event: both aircraft (callsign, registration, type and name, altitude, speed, heading, GPS or MLAT, ADS-B Exchange link), geometry, place, flags.
 - **Full path of a selected flight** (search result or event) at every altitude and range, from `t/<hour>.json` built by `pi/tracks.py` (simplified for drawing; the log keeps every point). Prompted by AAL1623: its map points began at 13,450 ft (the 15,000 ft ceiling) and ended at 1,575 ft about 12 mi south of DCA, where reception from the farm runs out.
+- **Near-the-farm search** (09-25, his request: "all planes within X miles of the farm between this time frame and this height"): header button 📍. Searches the full track files (all altitudes, departures included) segment by segment, so a crossing between two recorded points still counts; heights above the farm's ground (altimeter at the time, `farm.ground_ft` published in live.json). First real run: 11 passes within 2 mi and 0–3,000 ft in 24 h (PAT24 H60, SENTRY7 EC45, Cirrus N658CK at 0.3 mi…).
+- Search by type needs the ICAO code (BE35 for the V-tail Bonanza, V22 for the Osprey); "BE35" found 8 on 09-25 — he may have typed a model name. Plain-name search (Osprey, Bonanza) is offered, not built.
 - **Hide viewed incidents**: per browser, in localStorage; "Show N hidden" restores.
 - The **Now** button stays at now; playback stops at the live edge.
 
