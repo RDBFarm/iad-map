@@ -384,6 +384,8 @@ def fetch_weather(start):
                 vis = float(vis.rstrip("+")) if vis.rstrip("+").replace(".", "", 1).isdigit() else None
             out.append({
                 "t": round((t - start) / 60, 1),
+                "epoch": int(t),
+                "altim_hpa": o.get("altim") if isinstance(o.get("altim"), (int, float)) else None,
                 "tmpf": round(temp * 9 / 5 + 32) if isinstance(temp, (int, float)) else None,
                 "drct": 0 if vrb else int(wdir),
                 "sknt": int(wspd),
@@ -422,7 +424,20 @@ def hour_chunk(rows, hour_start):
     return {"start": hour_start, "ac": ac, "pts": pts}
 
 
-def build(now):
+def altim_lookup(wx):
+    """altim_at(t): KIAD's altimeter setting (hPa) in force at time t, i.e.
+    from the latest report at or before it (within 3 hours), else None."""
+    obs = sorted((w["epoch"], w["altim_hpa"]) for w in wx if w.get("altim_hpa"))
+    def altim_at(t):
+        best = None
+        for e, a in obs:
+            if e <= t + 60:
+                best = (e, a)
+        return best[1] if best and t - best[0] < 3 * 3600 else None
+    return altim_at
+
+
+def build(now, wx=None):
     """Returns (index, {filename: bytes})."""
     end = int(now)
     start = end - SPAN_S
@@ -471,7 +486,7 @@ def build(now):
             "aircraft_mlat_only": len(mlat_ac - adsb_ac),
             "receiver": "Red Devil Bison Farm, Poolesville MD",
         },
-        "wx": fetch_weather(start),
+        "wx": wx if wx is not None else fetch_weather(start),
         # Events at any range, for highlighting: emergencies from alerts.py,
         # close approaches and TCAS advisories from proximity.py.
         "events": {
@@ -571,6 +586,7 @@ def enrich(index):
 
 
 def main():
+    wx = fetch_weather(int(time.time()) - SPAN_S)
     if os.path.exists(DB_PATH):
         try:
             n = proximity.update(DB_PATH, EVENTS_DIR)
@@ -578,11 +594,11 @@ def main():
         except Exception as e:  # never let this stop the map
             print("publish: close-approach check failed:", e, flush=True)
         try:
-            n = farm.update(DB_PATH, EVENTS_DIR)
+            n = farm.update(DB_PATH, EVENTS_DIR, altim_at=altim_lookup(wx))
             print(f"publish: {n} passes over the farm logged", flush=True)
         except Exception as e:  # never let this stop the map
             print("publish: farm-pass check failed:", e, flush=True)
-    index, files = build(time.time())
+    index, files = build(time.time(), wx)
     index["farm"]["summary"] = farm.summary(index["farm"]["passes"])
     enrich(index)
     m = index["meta"]
