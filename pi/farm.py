@@ -50,6 +50,12 @@ def type_name(actype):
     return _NAMES.get((actype or "").upper())
 
 
+def is_helicopter(actype):
+    """True for a helicopter type (ICAO description starting with H)."""
+    desc = aircraft_types().get((actype or "").upper())
+    return bool(desc) and desc[0] == "H"
+
+
 def is_prop(actype):
     """True for a propeller aeroplane, False for anything else known, None if unknown."""
     desc = aircraft_types().get((actype or "").upper())
