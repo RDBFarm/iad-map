@@ -23,6 +23,7 @@ than assuming.
 - **Not yet checked on the real Pi:** drive growth per day (estimate ~1 GB),
   `publish.py` memory on the 2 GB Pi (measured ~490 MB in the sandbox), the
   live map on his iPad.
+- **Pending his answer (09-25):** helicopter low-pass alerts "below 500 ft?" — asked whether he means 500 ft reported (≈100 ft above the fields) or 500 ft above the fields (≈900 ft reported). The first real low-pass alert was PAT26, an H60, at 700 ft reported, 5:47 PM 09-24 (issue #21); he expects to tire of these.
 - **Open:** close-approach thresholds (tune after a week of real traffic),
   runway headings in the classifier (magnetic vs true), live map panels
   overlapping at phone width.
@@ -187,7 +188,7 @@ See `README.md` for how to install. In short:
 ### Emergencies and close approaches (built and installed 09-24)
 - **Emergencies (7500/7600/7700) push to his phone** — his choice (09-24): text or GitHub; just him; everything the receiver hears. Built as `pi/alerts.py` → alert file on the `alerts` branch (deploy key) → `.github/workflows/emergency-alert.yml` opens an issue as github-actions[bot] mentioning @RDBFarm. Not with his own token: GitHub doesn't notify you about your own actions. Needs 3 consecutive reads (~6 s). Medical/min-fuel statuses logged only. Test with `alerts.py --test` after install; he needs the GitHub app with notifications on.
 - **Near misses: a log plus map highlights, no push** (his choice, 09-24). `pi/proximity.py`: under 500 ft vertically and closer than **10 s at their relative speed**, kept between 0.15 and 1.0 nm (his request, 09-24: "a slow near miss has a much smaller radius than a fast one"); both airborne; flags near_airport / low / persistent / mlat / tcas. Thresholds are first guesses — tune after real traffic. The first live event (09-24, two AVL-callsign light aircraft passing 0.85 nm apart at ~200 kt relative, 21 nm WNW of the farm) prompted the speed scaling; under it that pass is not logged. Relative speed, not range rate: range rate is zero at every closest point. Call them close approaches, never near misses, unless a TCAS advisory confirms.
-- **This readsb does report TCAS advisories (`acas_ra`)** — confirmed 09-24: 6 logged that day from 4 aircraft, all well above 15,000 ft (the first real one: VXP1191, a 737-700, "Level Off" at 30,400 ft descending towards UAL2748 level at 29,000 ft, 3:55:07 PM ET, ~38 nm SSW of the farm; "Clear of Conflict" 61 s later; closest ~4 nm and ~1,800 ft). Each RA is broadcast twice: the advisory and then "Clear of Conflict" — the Events list shows both.
+- **This readsb does report TCAS advisories (`acas_ra`)** — confirmed 09-24: 6 logged that day from 4 aircraft, all well above 15,000 ft (the first real one: VXP1191, a 737-700, "Level Off" at 30,400 ft descending towards UAL2748 level at 29,000 ft, 3:55:07 PM ET, ~38 nm SSW of the farm; "Clear of Conflict" 61 s later; closest ~4 nm and ~1,800 ft). Each RA is broadcast twice: the advisory and then "Clear of Conflict". **Not shown on the map since 09-25** (his call: "It was never a concern if it happened 4nm from each other"); still logged in `events/tcas.jsonl`, and a close approach flagged `tcas` is still shown.
 - At phone width the live map's panels overlap (inherited layout, worse with the Events list). Not fixed.
 
 ### Over the farm (built and installed 09-24)
