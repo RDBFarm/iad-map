@@ -498,6 +498,8 @@ def build(now, wx=None):
         # included and marked; the summary leaves props out.
         "farm": {
             "center": list(farm.FARM), "radius_nm": farm.FARM_RADIUS_NM,
+            # for the map's Near-the-farm search: average ground height, basis
+            "ground_ft": farm.ground_ft(*farm.FARM)[0], "ground_basis": farm.ground_ft(*farm.FARM)[1],
             "passes": proximity.recent(EVENTS_DIR, "farm_passes.jsonl", start),
         },
         "chunks": chunks,
