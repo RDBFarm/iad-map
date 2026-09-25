@@ -42,14 +42,15 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
 from the map" removes it for that browser (remembered between visits), and
 "Show N hidden" brings hidden ones back.
 
-- `farm.py` logs every aircraft passing within 1 nm of the farm parcel's
-  centre, at any altitude, to `events/farm_passes.jsonl`. The live map shows
-  the last 24 hours as a figure (count, median and lowest altitude) and
-  highlights passes under 2,000 ft; `alerts.py` pushes passes under 1,500 ft
-  to the phone (helicopters only under 550 ft). Propeller aeroplanes (piston, turboprop or electric
-  fixed-wing, by ICAO type in `aircraft_types.json`, from tar1090-db) are left
-  out of all three. Helicopters and jets are in. Unknown types are counted
-  and shown, marked, but not pushed.
+- `farm.py` logs every aircraft whose path crosses the farm's land (the
+  parcel boundary), at any altitude, to `events/farm_passes.jsonl`, with its
+  height above the farm's ground: reported altitude corrected with KIAD's
+  altimeter setting, minus the ground elevation (USGS, measured once at
+  install). The live map shows the last 24 hours as a figure and highlights
+  passes under 1,600 ft above the ground; `alerts.py` pushes jets under
+  1,100 ft and helicopters under 150 ft. Prop planes (by ICAO type in
+  `aircraft_types.json`, from tar1090-db) are left out; unknown types are
+  counted and shown, not pushed.
 
 - `aircraft_lookup.py` supplies aircraft types, which readsb on this image
   doesn't: it looks each ICAO address up in tar1090's aircraft database,

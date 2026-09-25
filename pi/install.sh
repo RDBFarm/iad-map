@@ -118,6 +118,13 @@ Persistent=true
 WantedBy=timers.target
 UNIT
 
+echo "== Measuring the farm's ground elevation (USGS), once"
+if [ ! -f "$DATA_DIR/farm_ground.json" ]; then
+  sudo -u "$USER_NAME" python3 /opt/iad-map/farm.py --ground || echo "   USGS elevation failed; using ~380 ft from the notes until it succeeds (re-run the installer)"
+else
+  echo "   already measured"
+fi
+
 echo "== Building the aircraft type lookup (downloads about 8 MB)"
 sudo -u "$USER_NAME" python3 /opt/iad-map/aircraft_lookup.py --build || echo "   lookup build failed; types will be missing until it succeeds"
 

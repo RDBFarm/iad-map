@@ -20,15 +20,17 @@ single garbled message doesn't raise an alarm. Then, once per episode:
     (An issue opened with the owner's own token would not notify him:
     GitHub doesn't notify you about your own actions.)
 
-Also: any aircraft within 1 nm of the farm below 1,500 ft (reported
-pressure altitude), seen on 2 reads in a row, is logged to
-events/low_passes.jsonl, once per aircraft per 10 minutes -- unless it is a
-propeller aeroplane. It is pushed only when its type is known and is not a
-prop plane; an unknown type is logged, not pushed. Helicopters push only
-below LOW_PASS_HELI_FT (550 ft reported, about 150 ft above the fields): a
-Black Hawk at 700 ft (~300 ft above the fields) was heard and "not
-concerning at all". Owner's decisions, 2026-09-24/25. farm.py decides what
-is a prop plane or a helicopter.
+Also: any aircraft whose path between two consecutive positions crosses
+the farm's land (the parcel, farm.py) below farm.LOW_ALERT_AGL_FT above the
+farm's ground (pressure altitude corrected with KIAD's altimeter setting,
+minus the ground elevation) is logged to events/low_passes.jsonl, once per
+aircraft per 10 minutes -- unless it is a propeller aeroplane. It is pushed
+only when its type is known and is not a prop plane; an unknown type is
+logged, not pushed. Helicopters push only below farm.HELI_ALERT_AGL_FT
+(150 ft above the ground): a Black Hawk ~300 ft above the fields was heard
+and "not concerning at all". Owner's decisions, 2026-09-24/25; "over the
+land" and height above ground replaced a 1 nm radius and reported altitude
+on 09-25.
 
 Other ADS-B emergency statuses (lifeguard, minfuel, downed, reserved) are
 logged but not pushed; the owner asked for the three squawks only. An episode
@@ -59,9 +61,7 @@ SQUAWKS = {"7700": "general emergency", "7600": "radio failure", "7500": "unlawf
 STATUS_WORDS = {"general": "general emergency", "nordo": "radio failure",
                 "unlawful": "unlawful interference", "lifeguard": "medical priority",
                 "minfuel": "minimum fuel", "downed": "downed aircraft", "reserved": "reserved"}
-LOW_PASS_FT = 1500
-LOW_PASS_HELI_FT = 550
-LOW_PASS_READS = 2
+WORK_DIR = os.environ.get("IADMAP_PUBLISH_DIR", os.path.join(DRIVE, "iad-map", "publish"))
 LOW_PASS_REPEAT_S = 600
 
 
@@ -109,13 +109,15 @@ def dist_bearing(lat1, lon1, lat2, lon2):
 def compose_low_pass(ev):
     who, op, idlines = who_lines(ev)
     kind = ""
-    title = (f"✈ Low over the farm: {who}" + (f" ({op[0]})" if op else "")
-             + (f" {ev['type']}" if ev.get("type") else "") + f" at {ev['alt']:,} ft")
+    title = (f"✈ Over the farm: {who}" + (f" ({op[0]})" if op else "")
+             + (f" {ev['type']}" if ev.get("type") else "") + f" at {ev['agl']:,} ft above the ground")
     body = "\n".join([
-        f"@RDBFarm — {who}{kind} was {ev['dist_nm']} nm from the centre of the farm, and inside 1 nm, at {ev['utc']} UTC.",
+        f"@RDBFarm — {who}{kind} crossed the farm's land at {ev['utc']} UTC.",
         "",
-        f"- **Altitude:** {ev['alt']:,} ft (reported pressure altitude, roughly above sea level; "
-        "the farm's ground is a few hundred feet up)",
+        f"- **Height above the farm's ground:** about {ev['agl']:,} ft "
+        f"(reported {ev['alt']:,} ft; ground {ev['ground_ft']} ft, {ev['ground_basis']}; "
+        + (f"pressure-corrected with KIAD's altimeter {ev['altim_hpa'] * 0.02953:.2f} inHg)" if ev.get("altim_hpa")
+           else "no altimeter correction available)"),
         f"- **Speed:** {ev['gs']:.0f} kt; **track** {ev['track']:.0f}°" if ev.get("gs") is not None and ev.get("track") is not None else "- **Speed/track:** not reported",
     ] + idlines + [
         "",
@@ -123,9 +125,9 @@ def compose_low_pass(ev):
         f"[Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao={ev['hex']}) · "
         "[Live map](https://rdbfarm.github.io/iad-map/live.html)",
         "",
-        f"_Automatic alert from `pi/alerts.py`: within {farm.FARM_RADIUS_NM} nm of the farm below "
-        f"{LOW_PASS_FT:,} ft ({LOW_PASS_HELI_FT} ft for helicopters) on {LOW_PASS_READS} reads in a row. "
-        "Prop planes and unknown types are logged, not alerted._"])
+        f"_Automatic alert from `pi/alerts.py`: path crossed the farm's land below "
+        f"{farm.LOW_ALERT_AGL_FT:,} ft above the ground ({farm.HELI_ALERT_AGL_FT} ft for helicopters). "
+        "Prop planes and unknown types are logged, not alerted. Heights are +/- about 100 ft._"])
     return title, body
 
 
@@ -225,41 +227,69 @@ def actype(ac):
     return ac.get("t") or aircraft_lookup.type_for(ac.get("hex"))
 
 
-def low_pass_candidate(ac):
+_ALTIM = {"at": 0, "hpa": None}
+
+
+def current_altim():
+    """KIAD's latest altimeter setting (hPa) from the map build's weather,
+    refreshed every 5 minutes; None if missing or over 3 hours old."""
+    now = time.time()
+    if now - _ALTIM["at"] > 300:
+        _ALTIM["at"], _ALTIM["hpa"] = now, None
+        try:
+            with open(os.path.join(WORK_DIR, "live.json")) as f:
+                wx = [w for w in json.load(f).get("wx", []) if w.get("altim_hpa") and w.get("epoch")]
+            if wx and now - wx[-1]["epoch"] < 3 * 3600:
+                _ALTIM["hpa"] = wx[-1]["altim_hpa"]
+        except (OSError, ValueError):
+            pass
+    return _ALTIM["hpa"]
+
+
+def low_pass_candidate(ac, prev):
+    """(lat, lon, alt, agl) of the lower end of a path segment that crosses
+    the farm's land below LOW_ALERT_AGL_FT, or None. prev is the aircraft's
+    previous position (t, lat, lon, alt) from an earlier read, or None."""
     alt = ac.get("alt_baro")
-    if not isinstance(alt, (int, float)) or alt >= LOW_PASS_FT:
-        return False   # "ground", missing, or high enough
-    if ac.get("lat") is None or ac.get("seen_pos", 99) > 10:
-        return False
-    if farm.dist_nm(ac["lat"], ac["lon"]) > farm.FARM_RADIUS_NM:
-        return False
-    return farm.is_prop(actype(ac)) is not True
+    if not isinstance(alt, (int, float)) or ac.get("lat") is None or ac.get("seen_pos", 99) > 10:
+        return None
+    if prev is None or not farm.crosses(prev[1], prev[2], ac["lat"], ac["lon"]):
+        return None
+    lat, lon, a = (prev[1], prev[2], prev[3]) if prev[3] < alt else (ac["lat"], ac["lon"], alt)
+    if not farm.inside(lat, lon):
+        lat, lon = ac["lat"], ac["lon"]
+    agl = farm.height_agl(a, lat, lon, current_altim())
+    if agl is None or agl >= farm.LOW_ALERT_AGL_FT or farm.is_prop(actype(ac)) is True:
+        return None
+    return lat, lon, a, agl
 
 
-def low_pass_should_push(ac):
-    """Known non-prop type, and for a helicopter, below LOW_PASS_HELI_FT."""
+def low_pass_should_push(ac, agl):
+    """Known non-prop type, and for a helicopter, below HELI_ALERT_AGL_FT."""
     t = actype(ac)
     if farm.is_prop(t) is not False:
         return False                     # prop plane or unknown type
     if farm.is_helicopter(t):
-        return ac.get("alt_baro") < LOW_PASS_HELI_FT
+        return agl < farm.HELI_ALERT_AGL_FT
     return True
 
 
-def low_pass_event(ac, now):
+def low_pass_event(ac, now, where):
+    lat, lon, alt, agl = where
+    ground, basis = farm.ground_ft(lat, lon)
     return {"kind": "low_pass", "t": int(now),
             "utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now)),
             "hex": ac.get("hex", ""), "flight": (ac.get("flight") or "").strip(), "type": actype(ac),
-            "prop": farm.is_prop(actype(ac)), "alt": ac.get("alt_baro"), "gs": ac.get("gs"),
-            "track": ac.get("track"), "lat": ac.get("lat"), "lon": ac.get("lon"),
-            "dist_nm": round(farm.dist_nm(ac["lat"], ac["lon"]), 2),
+            "prop": farm.is_prop(actype(ac)), "alt": alt, "agl": agl, "ground_ft": ground,
+            "ground_basis": basis, "altim_hpa": current_altim(), "gs": ac.get("gs"),
+            "track": ac.get("track"), "lat": lat, "lon": lon,
             "mlat": 1 if "lat" in (ac.get("mlat") or []) else 0}
 
 
 def watch():
     streak = {}     # (hex, code) -> consecutive reads
     active = {}     # (hex, code) -> last time seen
-    low_streak = {}  # hex -> consecutive low reads over the farm
+    last_pos = {}    # hex -> (t, lat, lon, alt) from the previous read
     low_last = {}    # hex -> time of last low-pass push
     low_logged = {}  # hex -> time of last low-pass logged without a push
     pending = False
@@ -274,23 +304,26 @@ def watch():
             data = {"aircraft": []}
         now = data.get("now", started)
         seen_now = set()
-        low_now = set()
         for ac in data.get("aircraft", []):
             if ac.get("seen", 99) > 10:
                 continue
-            if low_pass_candidate(ac):
-                h = ac.get("hex")
-                low_now.add(h)
-                low_streak[h] = low_streak.get(h, 0) + 1
-                push = low_pass_should_push(ac)
+            h = ac.get("hex")
+            prev = last_pos.get(h)
+            if prev and not (0 < now - prev[0] <= farm.PREV_MAX_S):
+                prev = None
+            if ac.get("lat") is not None and isinstance(ac.get("alt_baro"), (int, float)):
+                last_pos[h] = (now, ac["lat"], ac["lon"], ac["alt_baro"])
+            where = low_pass_candidate(ac, prev)
+            if where:
+                push = low_pass_should_push(ac, where[3])
                 due = (now - low_last.get(h, 0) > LOW_PASS_REPEAT_S if push
                        else now - low_logged.get(h, 0) > LOW_PASS_REPEAT_S and now - low_last.get(h, 0) > LOW_PASS_REPEAT_S)
-                if low_streak[h] >= LOW_PASS_READS and due:
+                if due:
                     (low_last if push else low_logged)[h] = now
-                    ev = low_pass_event(ac, now)
+                    ev = low_pass_event(ac, now, where)
                     ev["pushed"] = push
                     append_event(ev, "low_passes.jsonl")
-                    print("alerts: low pass", ev["hex"], ev.get("flight"), ev["alt"],
+                    print("alerts: low pass", ev["hex"], ev.get("flight"), ev["agl"], "ft AGL",
                           "pushed" if ev["pushed"] else "logged only", flush=True)
                     if ev["pushed"]:
                         try:
@@ -324,9 +357,7 @@ def watch():
         for key in list(streak):
             if key not in seen_now:
                 del streak[key]
-        for h in list(low_streak):
-            if h not in low_now:
-                del low_streak[h]
+        last_pos = {h: v for h, v in last_pos.items() if now - v[0] <= farm.PREV_MAX_S}
         low_last = {h: t for h, t in low_last.items() if now - t <= LOW_PASS_REPEAT_S}
         low_logged = {h: t for h, t in low_logged.items() if now - t <= LOW_PASS_REPEAT_S}
         for key, last in list(active.items()):

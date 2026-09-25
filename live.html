@@ -236,7 +236,7 @@
   <div id="search-count"></div>
   <div id="search-results"></div>
   <div id="events">
-    <h3>🦬 Over the farm (1 nm), last 24 h</h3>
+    <h3>🦬 Over the farm's land, last 24 h</h3>
     <div id="farm-summary" style="line-height:1.5">—</div>
     <h3>⚠ Events, last 24 h</h3>
     <div id="events-list" style="max-height:160px;overflow-y:auto"></div>
@@ -1190,23 +1190,21 @@ drawLegend();
 // only; see pi/proximity.py for what the flags mean.
 const eventLayer = L.layerGroup().addTo(map);
 const EV_SYMBOL = {emergency: '▲', tcas: '◆', close: '◇', low: '▼'};   // tcas kept for old links
-const LOW_HIGHLIGHT_FT = 2000;   // owner's choice, 2026-09-24
+const LOW_HIGHLIGHT_AGL = 1600;  // ft above the farm's ground; owner's 2,000 ft reported, less ~400 ft of ground
 let farmRing = null;
 
 function drawFarm(f) {
   if (!f) return;
   FARM_CENTER = f.center;
-  if (!farmRing) {
-    farmRing = L.circle(f.center, {radius: f.radius_nm * 1852, color: '#fff', weight: 1.5,
-      dashArray: '4 4', fill: false, interactive: false}).addTo(map);
-  }
+  // "Over the farm" is over the land itself (the parcel outline on the map);
+  // heights are above the farm's ground (pi/farm.py).
   const s = f.summary || {};
   const fmt = n => Math.round(n).toLocaleString() + ' ft';
   document.getElementById('farm-summary').innerHTML = s.aircraft
-    ? `<b>${s.aircraft}</b> aircraft · median <b>${fmt(s.median_alt)}</b> · lowest <b>${fmt(s.lowest_alt)}</b>` +
-      `<br>${s.under_2000} under 2,000 ft` +
+    ? `<b>${s.aircraft}</b> aircraft crossed it · median <b>${fmt(s.median_agl)}</b> · lowest <b>${fmt(s.lowest_agl)}</b> above the ground` +
+      `<br>${s.under_highlight} under ${fmt(s.highlight_agl || LOW_HIGHLIGHT_AGL)}` +
       (s.props_excluded ? ` · ${s.props_excluded} prop plane${s.props_excluded > 1 ? 's' : ''} not counted` : '')
-    : 'No aircraft yet' + (s.props_excluded ? ` (${s.props_excluded} prop planes not counted)` : '') + '.';
+    : 'No aircraft over the land yet' + (s.props_excluded ? ` (${s.props_excluded} prop planes not counted)` : '') + '.';
 }
 
 function eventItems(ev) {
@@ -1239,11 +1237,11 @@ function eventItems(ev) {
         (f.includes('mlat') ? ' (MLAT position)' : '')});
   });
   (ev.farm_passes || []).forEach(p => {
-    if (p.prop === true || !(p.alt < LOW_HIGHLIGHT_FT)) return;
+    if (p.rule !== 'parcel' || p.prop === true || !(p.alt_agl < LOW_HIGHLIGHT_AGL)) return;
     const who = p.flight || p.hex.toUpperCase();
     items.push({kind: 'low', raw: p, t: p.t, lat: p.lat, lon: p.lon,
-      label: who + ' ' + Math.round(p.alt).toLocaleString() + ' ft',
-      detail: 'Over the farm at ' + Math.round(p.alt).toLocaleString() + ' ft, ' + p.dist_nm + ' nm from centre' +
+      label: who + ' ' + Math.round(p.alt_agl).toLocaleString() + ' ft',
+      detail: 'Over the farm’s land, ' + Math.round(p.alt_agl).toLocaleString() + ' ft above the ground' +
         (p.type ? ' (' + p.type + ')' : ' (type unknown)')});
   });
   items.sort((a, b) => b.t - a.t);
@@ -1366,12 +1364,15 @@ function eventCardHtml(it) {
       '<h5>Advisory as broadcast</h5>' + Object.keys(ra).map(k => row(k, esc(JSON.stringify(ra[k])))).join('');
   }
   if (it.kind === 'low') {
-    return `<h4>▼ Low over the farm</h4>` +
-      row('Closest to the farm', when(e.t)) +
-      row('Altitude', num(e.alt) + ' ft (reported; roughly above sea level)') +
-      row('Lowest during the pass', num(e.min_alt) + ' ft') +
-      row('From the farm centre', num(e.dist_nm, 2) + ' nm (' + num(e.dist_nm * 6076) + ' ft)') +
-      row('Over the farm', when(e.start).split(',')[0] + ' – ' + when(e.end).split(',')[0]) +
+    const corr = e.altim_hpa ? 'corrected with KIAD’s altimeter ' + num(e.altim_hpa * 0.02953, 2) + ' inHg'
+                             : 'no pressure correction available';
+    return `<h4>▼ Low over the farm’s land</h4>` +
+      row('Lowest point over the land', when(e.t)) +
+      row('Height above your ground', 'about ' + num(e.alt_agl) + ' ft') +
+      row('Lowest during the pass', 'about ' + num(e.min_agl) + ' ft above the ground') +
+      row('How that’s worked out', 'reported ' + num(e.alt) + ' ft, ' + corr + ', minus ground ' +
+        num(e.ground_ft) + ' ft (' + esc(e.ground_basis || '') + '); ±100 ft or so') +
+      row('Over the land', when(e.start).split(',')[0] + ' – ' + when(e.end).split(',')[0]) +
       row('Prop plane', e.prop === true ? 'yes' : e.prop === false ? 'no' : 'type unknown') +
       aircraftBlock(e, e.t, 'Aircraft');
   }
