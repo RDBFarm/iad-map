@@ -1189,7 +1189,7 @@ drawLegend();
 // flagged as airport traffic, formation or low-level are listed as a count
 // only; see pi/proximity.py for what the flags mean.
 const eventLayer = L.layerGroup().addTo(map);
-const EV_SYMBOL = {emergency: '▲', tcas: '◆', close: '◇', low: '▼'};
+const EV_SYMBOL = {emergency: '▲', tcas: '◆', close: '◇', low: '▼'};   // tcas kept for old links
 const LOW_HIGHLIGHT_FT = 2000;   // owner's choice, 2026-09-24
 let farmRing = null;
 
@@ -1215,9 +1215,10 @@ function eventItems(ev) {
     kind: 'emergency', raw: e, t: e.t, lat: e.lat, lon: e.lon,
     label: e.code + ' ' + (e.flight || e.hex.toUpperCase()),
     detail: e.code + (e.code === '7700' ? ' emergency' : e.code === '7600' ? ' radio failure' : ' unlawful interference')}));
-  (ev.tcas || []).forEach(e => items.push({
-    kind: 'tcas', raw: e, t: e.t, lat: e.lat, lon: e.lon,
-    label: 'TCAS ' + (e.flight || e.hex.toUpperCase()), detail: 'TCAS resolution advisory'}));
+  // TCAS advisories on their own are not shown (owner, 2026-09-25): the first
+  // ones were airliners kept miles apart by the system doing its job. They
+  // are still logged on the Pi (events/tcas.jsonl), and a close approach in
+  // which TCAS fired is still shown, flagged, below.
   let hidden = 0;
   (ev.close_approaches || []).forEach(e => {
     const f = e.flags || [];
