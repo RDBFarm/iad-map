@@ -4,9 +4,11 @@
 Every 2 seconds, reads readsb's /run/readsb/aircraft.json -- every aircraft
 the receiver hears, at any range -- and looks for:
 
-  squawk 7700 (general emergency), 7600 (radio failure), 7500 (unlawful
-  interference), or the matching ADS-B emergency status (general, nordo,
-  unlawful).
+  squawk 7700 (general emergency), 7600 (radio failure) or 7500 (unlawful
+  interference). Only the squawk itself is pushed. An ADS-B emergency status
+  (general, nordo, unlawful) with an ordinary squawk is logged, not pushed:
+  the first one seen (2026-09-25, RPA5604, status "unlawful" with squawk
+  1631) was a glitch, and a real one comes with the code.
 
 An aircraft has to show it on 3 reads in a row (~6 s) before it counts, so a
 single garbled message doesn't raise an alarm. Then, once per episode:
@@ -54,8 +56,9 @@ CONFIRM_READS = 3
 EPISODE_GAP_S = 600
 
 SQUAWKS = {"7700": "general emergency", "7600": "radio failure", "7500": "unlawful interference"}
-PUSH_STATUS = {"general": "7700", "nordo": "7600", "unlawful": "7500"}
-LOG_ONLY_STATUS = {"lifeguard", "minfuel", "downed", "reserved"}
+STATUS_WORDS = {"general": "general emergency", "nordo": "radio failure",
+                "unlawful": "unlawful interference", "lifeguard": "medical priority",
+                "minfuel": "minimum fuel", "downed": "downed aircraft", "reserved": "reserved"}
 LOW_PASS_FT = 1500
 LOW_PASS_HELI_FT = 550
 LOW_PASS_READS = 2
@@ -104,16 +107,17 @@ def dist_bearing(lat1, lon1, lat2, lon2):
 
 
 def compose_low_pass(ev):
-    who = ev.get("flight") or ev["hex"].upper()
+    who, op, idlines = who_lines(ev)
     kind = ""
-    title = f"✈ Low over the farm: {who}" + (f" ({ev['type']})" if ev.get("type") else "") + f" at {ev['alt']:,} ft"
+    title = (f"✈ Low over the farm: {who}" + (f" ({op[0]})" if op else "")
+             + (f" {ev['type']}" if ev.get("type") else "") + f" at {ev['alt']:,} ft")
     body = "\n".join([
         f"@RDBFarm — {who}{kind} was {ev['dist_nm']} nm from the centre of the farm, and inside 1 nm, at {ev['utc']} UTC.",
         "",
         f"- **Altitude:** {ev['alt']:,} ft (reported pressure altitude, roughly above sea level; "
         "the farm's ground is a few hundred feet up)",
         f"- **Speed:** {ev['gs']:.0f} kt; **track** {ev['track']:.0f}°" if ev.get("gs") is not None and ev.get("track") is not None else "- **Speed/track:** not reported",
-        f"- **Aircraft:** ICAO {ev['hex'].upper()}" + (f", type {ev['type']}" if ev.get("type") else ", type not reported"),
+    ] + idlines + [
         "",
         f"[ADS-B Exchange](https://globe.adsbexchange.com/?icao={ev['hex']}) · "
         f"[Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao={ev['hex']}) · "
@@ -125,19 +129,33 @@ def compose_low_pass(ev):
     return title, body
 
 
+def who_lines(ev):
+    """Callsign, airline, registration and type, for the alert body."""
+    who = ev.get("flight") or ev["hex"].upper()
+    op = aircraft_lookup.operator_for(ev.get("flight"))
+    reg = aircraft_lookup.reg_for(ev.get("hex"))
+    name = farm.type_name(ev.get("type"))
+    lines = [f"- **Flight:** {who}" + (f" — {op[0]}" + (f" (radio callsign {op[1]})" if op[1] else "") if op else "")]
+    lines.append(f"- **Aircraft:** " + ", ".join(x for x in [
+        reg and f"registration {reg}", ev.get("type") and f"type {ev['type']}" + (f" ({name})" if name else ""),
+        f"ICAO {ev['hex'].upper()}"] if x))
+    return who, op, lines
+
+
 def compose(ev, test=False):
     if ev.get("kind") == "low_pass":
         return compose_low_pass(ev)
     code = ev["code"]
-    what = SQUAWKS.get(code, ev.get("emergency") or "")
-    who = ev.get("flight") or ev["hex"].upper()
-    title = f"{'TEST — ' if test else ''}🚨 {code} {who}" + (f" ({ev['type']})" if ev.get("type") else "") + f" — {what}"
+    what = SQUAWKS.get(code) or STATUS_WORDS.get(ev.get("emergency"), ev.get("emergency") or "")
+    who, op, idlines = who_lines(ev)
+    airline = f" ({op[0]})" if op else ""
+    title = (f"{'TEST — ' if test else ''}🚨 {code} {who}{airline}"
+             + (f" {ev['type']}" if ev.get("type") else "") + f" — {what}")
     lines = [
         f"@RDBFarm — heard by the farm receiver at {ev['utc']} UTC.",
         "",
-        f"- **Code:** {code} ({what})" + (f"; ADS-B status: {ev['emergency']}" if ev.get("emergency") else ""),
-        f"- **Aircraft:** {who}, ICAO {ev['hex'].upper()}" + (f", type {ev['type']}" if ev.get("type") else ""),
-    ]
+        f"- **Squawk:** {ev.get('squawk') or 'not reported'}" + (f" ({what})" if ev.get("squawk") in SQUAWKS else ""),
+    ] + ([f"- **ADS-B emergency status:** {STATUS_WORDS.get(ev['emergency'], ev['emergency'])}"] if ev.get("emergency") else []) + idlines
     if ev.get("lat") is not None:
         pos = f"- **Position:** {ev['lat']:.4f}, {ev['lon']:.4f}"
         if ev.get("dist_nm") is not None:
@@ -281,10 +299,11 @@ def watch():
                         except (OSError, subprocess.SubprocessError) as e:
                             print("alerts: could not queue alert:", e, flush=True)
             status = ac.get("emergency")
-            code = ac.get("squawk") if ac.get("squawk") in SQUAWKS else PUSH_STATUS.get(status)
-            if code is None and status in LOG_ONLY_STATUS:
-                code = status  # logged, never pushed
-            if code is None:
+            if ac.get("squawk") in SQUAWKS:
+                code = ac.get("squawk")                 # pushed
+            elif status and status != "none":
+                code = "status-" + status               # logged, never pushed
+            else:
                 continue
             key = (ac.get("hex"), code)
             seen_now.add(key)

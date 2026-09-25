@@ -23,6 +23,7 @@ than assuming.
 - **Not yet checked on the real Pi:** drive growth per day (estimate ~1 GB),
   `publish.py` memory on the 2 GB Pi (measured ~490 MB in the sandbox), the
   live map on his iPad.
+- **Decided 09-25: emergencies push only on the squawk itself** (7500/7600/7700). The first 7500 alert (issue #25, 8:39 AM 09-25) was RPA5604, an E175 (N241JQ) at 27,000 ft ~97 nm SW, whose ADS-B emergency *status* read "unlawful" while its squawk was an ordinary 1631 — a glitch, and the old code titled it "7500". Status-only events are now logged and shown on the map as "status …", not pushed; titles show the real squawk. Alerts and cards now name the airline from `pi/operators.json` (tar1090-db): e.g. RPA = Republic Airlines (BRICKYARD), AVL = Aviation Adventures (the 09-24 close-approach Cessnas: a flight school), VXP = Avelo (AVELO).
 - **Decided 09-25: helicopters push only below 550 ft reported** (≈150 ft above the fields). The first real low-pass alert, PAT26 (an H60 Black Hawk) at 700 ft reported, ≈300 ft above the fields, 5:47 PM 09-24 (issue #21), was heard and "not concerning at all". Jets still push below 1,500 ft; helicopters between 550 and 1,500 ft are logged and shown, not pushed.
 - **Open:** close-approach thresholds (tune after a week of real traffic),
   runway headings in the classifier (magnetic vs true), live map panels
