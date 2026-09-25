@@ -45,7 +45,7 @@ from the map" removes it for that browser (remembered between visits), and
   centre, at any altitude, to `events/farm_passes.jsonl`. The live map shows
   the last 24 hours as a figure (count, median and lowest altitude) and
   highlights passes under 2,000 ft; `alerts.py` pushes passes under 1,500 ft
-  to the phone. Propeller aeroplanes (piston, turboprop or electric
+  to the phone (helicopters only under 550 ft). Propeller aeroplanes (piston, turboprop or electric
   fixed-wing, by ICAO type in `aircraft_types.json`, from tar1090-db) are left
   out of all three. Helicopters and jets are in. Unknown types are counted
   and shown, marked, but not pushed.

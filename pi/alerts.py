@@ -22,8 +22,11 @@ Also: any aircraft within 1 nm of the farm below 1,500 ft (reported
 pressure altitude), seen on 2 reads in a row, is logged to
 events/low_passes.jsonl, once per aircraft per 10 minutes -- unless it is a
 propeller aeroplane. It is pushed only when its type is known and is not a
-prop plane (jets, helicopters); an unknown type is logged, not pushed.
-Owner's decisions, 2026-09-24. farm.py decides what is a prop plane.
+prop plane; an unknown type is logged, not pushed. Helicopters push only
+below LOW_PASS_HELI_FT (550 ft reported, about 150 ft above the fields): a
+Black Hawk at 700 ft (~300 ft above the fields) was heard and "not
+concerning at all". Owner's decisions, 2026-09-24/25. farm.py decides what
+is a prop plane or a helicopter.
 
 Other ADS-B emergency statuses (lifeguard, minfuel, downed, reserved) are
 logged but not pushed; the owner asked for the three squawks only. An episode
@@ -54,6 +57,7 @@ SQUAWKS = {"7700": "general emergency", "7600": "radio failure", "7500": "unlawf
 PUSH_STATUS = {"general": "7700", "nordo": "7600", "unlawful": "7500"}
 LOG_ONLY_STATUS = {"lifeguard", "minfuel", "downed", "reserved"}
 LOW_PASS_FT = 1500
+LOW_PASS_HELI_FT = 550
 LOW_PASS_READS = 2
 LOW_PASS_REPEAT_S = 600
 
@@ -116,8 +120,8 @@ def compose_low_pass(ev):
         "[Live map](https://rdbfarm.github.io/iad-map/live.html)",
         "",
         f"_Automatic alert from `pi/alerts.py`: within {farm.FARM_RADIUS_NM} nm of the farm below "
-        f"{LOW_PASS_FT:,} ft on {LOW_PASS_READS} reads in a row. Only known non-prop types (jets, "
-        "helicopters) are alerted; unknown types are logged._"])
+        f"{LOW_PASS_FT:,} ft ({LOW_PASS_HELI_FT} ft for helicopters) on {LOW_PASS_READS} reads in a row. "
+        "Prop planes and unknown types are logged, not alerted._"])
     return title, body
 
 
@@ -214,6 +218,16 @@ def low_pass_candidate(ac):
     return farm.is_prop(actype(ac)) is not True
 
 
+def low_pass_should_push(ac):
+    """Known non-prop type, and for a helicopter, below LOW_PASS_HELI_FT."""
+    t = actype(ac)
+    if farm.is_prop(t) is not False:
+        return False                     # prop plane or unknown type
+    if farm.is_helicopter(t):
+        return ac.get("alt_baro") < LOW_PASS_HELI_FT
+    return True
+
+
 def low_pass_event(ac, now):
     return {"kind": "low_pass", "t": int(now),
             "utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now)),
@@ -228,7 +242,8 @@ def watch():
     streak = {}     # (hex, code) -> consecutive reads
     active = {}     # (hex, code) -> last time seen
     low_streak = {}  # hex -> consecutive low reads over the farm
-    low_last = {}    # hex -> time of last low-pass alert
+    low_last = {}    # hex -> time of last low-pass push
+    low_logged = {}  # hex -> time of last low-pass logged without a push
     pending = False
     rx = receiver_position()
     while True:
@@ -249,13 +264,16 @@ def watch():
                 h = ac.get("hex")
                 low_now.add(h)
                 low_streak[h] = low_streak.get(h, 0) + 1
-                if low_streak[h] == LOW_PASS_READS and now - low_last.get(h, 0) > LOW_PASS_REPEAT_S:
-                    low_last[h] = now
+                push = low_pass_should_push(ac)
+                due = (now - low_last.get(h, 0) > LOW_PASS_REPEAT_S if push
+                       else now - low_logged.get(h, 0) > LOW_PASS_REPEAT_S and now - low_last.get(h, 0) > LOW_PASS_REPEAT_S)
+                if low_streak[h] >= LOW_PASS_READS and due:
+                    (low_last if push else low_logged)[h] = now
                     ev = low_pass_event(ac, now)
-                    ev["pushed"] = ev["prop"] is False   # unknown type: log only
+                    ev["pushed"] = push
                     append_event(ev, "low_passes.jsonl")
                     print("alerts: low pass", ev["hex"], ev.get("flight"), ev["alt"],
-                          "pushed" if ev["pushed"] else "logged (type unknown)", flush=True)
+                          "pushed" if ev["pushed"] else "logged only", flush=True)
                     if ev["pushed"]:
                         try:
                             queue_alert(ev)
@@ -291,6 +309,7 @@ def watch():
             if h not in low_now:
                 del low_streak[h]
         low_last = {h: t for h, t in low_last.items() if now - t <= LOW_PASS_REPEAT_S}
+        low_logged = {h: t for h, t in low_logged.items() if now - t <= LOW_PASS_REPEAT_S}
         for key, last in list(active.items()):
             if now - last > EPISODE_GAP_S:
                 del active[key]

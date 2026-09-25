@@ -23,7 +23,7 @@ than assuming.
 - **Not yet checked on the real Pi:** drive growth per day (estimate ~1 GB),
   `publish.py` memory on the 2 GB Pi (measured ~490 MB in the sandbox), the
   live map on his iPad.
-- **Pending his answer (09-25):** helicopter low-pass alerts "below 500 ft?" — asked whether he means 500 ft reported (≈100 ft above the fields) or 500 ft above the fields (≈900 ft reported). The first real low-pass alert was PAT26, an H60, at 700 ft reported, 5:47 PM 09-24 (issue #21); he expects to tire of these.
+- **Decided 09-25: helicopters push only below 550 ft reported** (≈150 ft above the fields). The first real low-pass alert, PAT26 (an H60 Black Hawk) at 700 ft reported, ≈300 ft above the fields, 5:47 PM 09-24 (issue #21), was heard and "not concerning at all". Jets still push below 1,500 ft; helicopters between 550 and 1,500 ft are logged and shown, not pushed.
 - **Open:** close-approach thresholds (tune after a week of real traffic),
   runway headings in the classifier (magnetic vs true), live map panels
   overlapping at phone width.
