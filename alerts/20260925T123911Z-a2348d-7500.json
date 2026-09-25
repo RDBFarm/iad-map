@@ -1,0 +1,23 @@
+{
+ "title": "\ud83d\udea8 7500 RPA5604 (E75L) \u2014 unlawful interference",
+ "body": "@RDBFarm \u2014 heard by the farm receiver at 2026-09-25 12:39:11 UTC.\n\n- **Code:** 7500 (unlawful interference); ADS-B status: unlawful\n- **Aircraft:** RPA5604, ICAO A2348D, type E75L\n- **Position:** 37.9379, -78.8340 \u2014 97 nm from the farm, bearing 222\u00b0\n- **Altitude:** 27,000 ft; **speed** 411 kt; **track** 82\u00b0\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=a2348d) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=a2348d) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`. A squawk can be set by mistake and corrected within seconds; this confirms only that the code was seen on 3 reads in a row._",
+ "event": {
+  "t": 1790339951,
+  "utc": "2026-09-25 12:39:11",
+  "hex": "a2348d",
+  "flight": "RPA5604",
+  "type": "E75L",
+  "code": "7500",
+  "emergency": "unlawful",
+  "squawk": "1631",
+  "lat": 37.937897,
+  "lon": -78.834034,
+  "alt": 27000,
+  "gs": 411.3,
+  "track": 81.75,
+  "mlat": 0,
+  "dist_nm": 97.4,
+  "bearing": 222.0,
+  "pushed": true
+ }
+}
