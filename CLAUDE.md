@@ -226,6 +226,11 @@ See `README.md` for how to install. In short:
 - **Radar echoes hidden from close approaches** (page only; the Pi still logs them): a `~` target within 30° of the other's course and within 30% of its speed. 13 of the first 26 logged close approaches involved a `~` target; 11 matched that rule (0.01–0.1 nm apart), the other 2 crossed at 59° and 127° and are probably real non-ADS-B aircraft.
 - Event labels and tooltips are now HTML-escaped (they carry callsigns and community text).
 
+### Text messages (09-26, his request)
+- He asked whether alerts must go through GitHub. He tested his carrier's email-to-text address from his own email and the text arrived (09-26). So every pushed alert (emergency squawks, pushed low passes, within-sight alerts) is also emailed to that address as one plain line (no emoji, ≤160 characters). GitHub stays the written record.
+- Sent through an email account used **only for this** (suggested: a new Gmail with an app password), not his personal one. Settings in `/var/lib/iad-map/text.json`, mode 600, owned by `iadmap`, written only by `sudo -u iadmap python3 /opt/iad-map/alerts.py --setup-text` (password typed on the Pi, never in the repo or a chat). No restart needed after setup; `alerts.py --test` also sends a test text. Failed texts retry every minute; without `text.json` nothing is texted.
+- Some carriers have shut their email-to-text gateways; if his stops, Pushover was the suggested fallback.
+
 ### Within-sight alerts for Air Force One and the doomsday planes (09-26, his request)
 - His words: "For AF1 and Doomsday, it would be very cool to get an alert if it is within sight of the farm. as in I could see it with my own eyes, even if I would not be able to decern what it is."
 - `pi/watch.json` (built by `tools/make_notable.py`: plane-alert-db entries tagged Air Force One or Doomsday Plane): VC-25A 82-8000 and 92-9000, VC-25B "bridge" 25-3300, E-4B 73-1676, 73-1677, 74-0787, 75-0125, plus four Russian entries that won't come by.
