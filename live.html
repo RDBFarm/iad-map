@@ -254,7 +254,7 @@
 <div id="search-panel">
   <h3>🔍 Flight Search</h3>
   <div id="search-wrap">
-    <input type="text" id="search-input" placeholder="Flight, type, or family (e.g. 737, V22)…" autocomplete="off">
+    <input type="text" id="search-input" placeholder="Flight, type or name (e.g. 737, Osprey, Bonanza)…" autocomplete="off">
     <span id="search-clear" onclick="clearSearch()">✕</span>
   </div>
   <div id="search-count"></div>
@@ -514,6 +514,10 @@ function doSearch(query) {
     familyMatch[1].forEach(t => highlightTypes.add(t));
   }
 
+  // Plain names: "Osprey", "Bonanza", "Black Hawk", "V-tail"…
+  const nameMatches = typesForName(query);
+  nameMatches.forEach(t => highlightTypes.add(t));
+
   // Check if query matches raw type codes
   ACS.forEach(a => {
     const rawType = (a[1] || '').toUpperCase();
@@ -558,9 +562,32 @@ function doSearch(query) {
     el.appendChild(div);
   });
 
+  const seenTypes = new Set(results.map(r => r.rawType));
+  const named = nameMatches.filter(t => seenTypes.has(t)).map(t => t + ' ' + (TYPE_NAMES[t] || '')).slice(0, 3);
   document.getElementById('search-count').textContent =
-    results.length ? results.length + ' flight' + (results.length>1?'s':'') + ' found' : 'No matches';
+    (results.length ? results.length + ' flight' + (results.length>1?'s':'') + ' found' : 'No matches') +
+    (named.length ? ' · ' + named.join(' · ') : '');
   redraw();
+}
+
+// ── Aircraft type names, for searching by plain name ──────────────────────
+// From pi/aircraft_types.json (ICAO names via tar1090-db), loaded once from
+// this site. A name matches at the start of any word, so "hawk" finds
+// Black Hawk but "ual" doesn't match inside a word.
+let TYPE_NAMES = {};
+const TYPE_ALIASES = {        // common names that aren't in the ICAO list
+  'V-TAIL': ['BE35'], 'VTAIL': ['BE35'], 'V TAIL': ['BE35'], 'V35': ['BE35'], 'V-35': ['BE35'],
+};
+fetch('pi/aircraft_types.json').then(r => r.ok ? r.json() : null)
+  .then(d => { if (d && d.names) TYPE_NAMES = d.names; }).catch(() => {});
+function typesForName(query) {
+  const q = query.trim().toUpperCase();
+  const out = new Set(TYPE_ALIASES[q] || []);
+  if (q.length >= 3) {
+    const re = new RegExp('(^|[^A-Z0-9])' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    Object.entries(TYPE_NAMES).forEach(([code, name]) => { if (re.test(name)) out.add(code); });
+  }
+  return [...out];
 }
 
 let selectedResultEl = null;
