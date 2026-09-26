@@ -1,9 +1,10 @@
+<!-- Built from live.html by tools/make_public.py. Do not edit; edit live.html. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>IAD Flight Activity — Live</title>
+<title>IAD Flight Activity</title>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -248,11 +249,11 @@
 <div id="hdr">
   <div>
     <h1>✈ IAD Flight Activity</h1>
-    <div class="sub">Washington Dulles · last 24 hours · 50-mile radius ·<!--farm--> RDBF receiver ·<!--/farm--> <span id="updated">loading…</span></div>
+    <div class="sub">Washington Dulles · last 24 hours · 50-mile radius · <span id="updated">loading…</span></div>
   </div>
   <span class="badge" id="badge-pos">— positions</span>
   <span style="margin-left:auto"></span>
-  <!--farm--><button class="btn" id="btn-near" onclick="toggleNear()">📍 Near the farm</button><!--/farm-->
+  
   <button class="btn" id="btn-mapstyle" onclick="toggleMapStyle()">🌙 Night Map</button>
   <span class="badge" id="badge-ac">— aircraft</span>
   <span class="badge">≤ 15,000 ft</span>
@@ -278,8 +279,7 @@
   <div id="search-count"></div>
   <div id="search-results"></div>
   <div id="events">
-    <!--farm--><h3>🦬 Over the farm's land, last 24 h</h3>
-    <div id="farm-summary" style="line-height:1.5">—</div><!--/farm-->
+    
     <h3>⚠ Events, last 24 h</h3>
     <div id="events-list" style="max-height:160px;overflow-y:auto"></div>
     <div id="events-note"></div>
@@ -359,20 +359,7 @@
   </div>
 </div>
 
-<!--farm--><div id="near-panel" hidden>
-  <button id="near-close" aria-label="Close" onclick="toggleNear()">✕</button>
-  <h4>📍 Aircraft near the farm</h4>
-  <form id="near-form">
-    <label>Within <input id="near-mi" type="number" min="0.1" max="50" step="0.1" value="2"> miles of the farm</label>
-    <label>From <input id="near-from" type="datetime-local"></label>
-    <label>To <input id="near-to" type="datetime-local"></label>
-    <label>Height above your ground <input id="near-hmin" type="number" step="100" value="0"> to
-      <input id="near-hmax" type="number" step="100" value="3000"> ft</label>
-    <button class="btn" type="submit">Search</button>
-  </form>
-  <div id="near-status" class="note"></div>
-  <div id="near-results"></div>
-</div><!--/farm-->
+
 
 <div id="ev-card" hidden><button id="ev-close" aria-label="Close" onclick="closeEventCard()">✕</button><div id="ev-body"></div></div>
 
@@ -422,7 +409,7 @@
 // flights.html is this page with the farm taken out: tools/make_public.py
 // builds it by setting this false, emptying PARCELS and dropping the HTML
 // between farm comment markers. Edit this file, never flights.html.
-const FARM_MODE = true;
+const FARM_MODE = false;
 let PTS = null;      // {n, lat, lon, alt, tmin, ap, ac, gs, track, vrate}
 const ACS = [];      // aircraft table: [label, type, ga, hex, category]; PTS.ac indexes it
 const AC_INDEX = new Map();
@@ -436,7 +423,7 @@ let WX = [];
 let META = null;
 let SPAN = 1440;     // minutes on the timeline
 const AP_INFO    = JSON.parse("{\"KIAD\": {\"name\": \"Dulles\", \"lat\": 38.9444, \"lon\": -77.4558}, \"KDCA\": {\"name\": \"Reagan Natl\", \"lat\": 38.8521, \"lon\": -77.0377}, \"KBWI\": {\"name\": \"BWI\", \"lat\": 39.1754, \"lon\": -76.6683}, \"KJYO\": {\"name\": \"Leesburg\", \"lat\": 39.0779, \"lon\": -77.5578}, \"KGAI\": {\"name\": \"Gaithersburg\", \"lat\": 39.1683, \"lon\": -77.166}, \"KHEF\": {\"name\": \"Manassas\", \"lat\": 38.7214, \"lon\": -77.5153}, \"KRMN\": {\"name\": \"Stafford\", \"lat\": 38.5997, \"lon\": -77.4542}, \"KADW\": {\"name\": \"Andrews AFB\", \"lat\": 38.8108, \"lon\": -76.8674}, \"KNYG\": {\"name\": \"Quantico MCAF\", \"lat\": 38.5036, \"lon\": -77.305}}");
-const PARCELS    = [{"type":"Feature","id":1229828,"geometry":{"type":"Polygon","coordinates":[[[-77.45387823334337,39.15179512095617],[-77.45584338516397,39.15253288009478],[-77.46553864151404,39.155998292902204],[-77.46564661002803,39.155416994240916],[-77.46672679463131,39.15367920373133],[-77.46807008949311,39.152485713697274],[-77.46933794293903,39.151290366416035],[-77.46957594079377,39.151065979048816],[-77.47035481607772,39.15033162431986],[-77.47034821256207,39.15030573521669],[-77.46272425476319,39.14725936707092],[-77.45673050115145,39.14486751323026],[-77.45580846225899,39.1463113810829],[-77.45743710517415,39.1463961623441],[-77.45730114785086,39.1491877192517],[-77.45508602183614,39.149074063871076],[-77.45527212761019,39.15128833226542],[-77.45403931474854,39.15110383734855],[-77.45387823334337,39.15179512095617]]]},"properties":{"PREMSNUM":"18020","PREMSNAM":"EDWARDS FERRY","PREMSTYP":"RD","PREMCITY":"POOLESVILLE","ACRES":214.39,"DESCLU":"Agricultural","ZONING":"AR"}}];
+const PARCELS = [];
 
 // Index: airport code → numeric id for fast filtering
 const AP_CODES = {"KIAD":0,"KDCA":1,"KBWI":2,"KJYO":3,"KGAI":4,"KHEF":5,"KRMN":6,"enroute":7,"KADW":8,"KNYG":9};

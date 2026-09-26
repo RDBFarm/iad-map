@@ -1,0 +1,15 @@
+# flights.html is built from live.html by tools/make_public.py. This fails
+# when someone edits live.html and forgets to rebuild it (or edits
+# flights.html by hand), so the two pages cannot drift apart.
+name: Public page up to date
+on:
+  push:
+    paths: ['live.html', 'flights.html', 'tools/make_public.py']
+  pull_request:
+    paths: ['live.html', 'flights.html', 'tools/make_public.py']
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/make_public.py --check
