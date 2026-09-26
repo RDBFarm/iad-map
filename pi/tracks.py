@@ -12,8 +12,9 @@ To keep uploads small each track is simplified for drawing: a point is kept
 at least every 60 s, whenever the track turns 3 degrees or the altitude
 changes 200 ft since the last kept point, on either side of any gap over
 30 s, and at each end. The drawn line matches the full data; the full log
-in flights.db keeps every point. A finished hour's file is built once and
-reused, so each push only carries the current hour's.
+in flights.db keeps every point. A finished hour's file is built once it has
+settled and then reused (publish.py keeps the list of final ones), so each
+push only carries the current hour's.
 """
 import json, os, sqlite3, time
 
@@ -21,7 +22,6 @@ KEEP_EVERY_S = 60
 TURN_DEG = 3
 CLIMB_FT = 200
 GAP_S = 30
-FINISHED_AFTER_S = 180   # an hour is final this long after it ends (commit lag)
 
 
 def _turn(a, b):
@@ -72,16 +72,19 @@ def hour_file(db, hour_start, type_for=None):
     return {"start": hour_start, "ac": ac}
 
 
-def build(db_path, work_dir, start, end, type_for=None):
-    """{"t/<hour>.json": bytes} for every hour touching [start, end]. Finished
-    hours already in work_dir are reused as they are."""
-    files = {}
+def build(db_path, work_dir, start, end, type_for=None, final=frozenset(), settle_s=600):
+    """({"t/<hour>.json": bytes} for every hour touching [start, end], names
+    now final). Files named in `final` are read back from work_dir as they
+    are; an hour is final once it ended settle_s before `end`."""
+    files, now_final = {}, set()
     first = start - start % 3600
     db = None
     for hour in range(first, end + 1, 3600):
         name = "t/" + time.strftime("%Y%m%d%H", time.gmtime(hour)) + ".json"
         path = os.path.join(work_dir, name)
-        if hour + 3600 + FINISHED_AFTER_S < end and os.path.exists(path):
+        if hour + 3600 + settle_s <= end:
+            now_final.add(name)
+        if name in final:
             with open(path, "rb") as f:
                 files[name] = f.read()
             continue
@@ -92,4 +95,4 @@ def build(db_path, work_dir, start, end, type_for=None):
             files[name] = json.dumps(body, separators=(",", ":")).encode()
     if db is not None:
         db.close()
-    return files
+    return files, now_final

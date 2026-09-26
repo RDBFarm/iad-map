@@ -19,9 +19,10 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
   within 50 miles of Dulles at or below 15,000 ft, and writes, on the `live-data` branch,
   one file per hour of positions (`h/`) and an index, `live.json`, with the
   counts and KIAD weather reports from aviationweather.gov. The branch is one
-  commit, amended and force-pushed each time, so the repository doesn't grow;
-  a finished hour's file never changes, so each push only uploads the current
-  hour.
+  commit, replaced and force-pushed each time, so the repository doesn't grow.
+  A finished hour's file is built once, 10 minutes after the hour ends, and
+  never changes after that; `live-data-prev` carries the same files on top of
+  the previous push, which is what lets git upload only the current hour.
 
 - `alerts.py` watches everything the receiver hears, every 2 seconds, for
   squawk 7700, 7600 or 7500. Seen on 3 reads in a row, it logs the event to

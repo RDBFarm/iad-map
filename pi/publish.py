@@ -9,11 +9,24 @@ of Dulles at or below 15,000 ft -- and writes, on the `live-data` branch of RDBF
                    weather, and the list of hour files with a hash of each
   h/<hour>.json    one file per UTC hour of positions
 
-The branch is kept to a single commit that each run amends and force-pushes,
-so the repository does not grow. A finished hour's file comes out byte-for-
-byte the same on every run, so after its first upload git never sends it
-again: each push carries only the current hour and the index. live.html
-fetches from raw.githubusercontent.com, so GitHub Pages is not rebuilt.
+The branch is kept to a single commit, replaced and force-pushed each run,
+so the repository does not grow. Two things keep each push down to what
+changed (the current hour, the index), and both were missing until
+2026-09-26, when every push carried the whole ~18 MiB tree:
+
+  - A finished hour's file is frozen: built once, SETTLE_S after the hour
+    ends, then read back from disk on every later run (FINAL_LIST names the
+    frozen ones). Rebuilt each run, old hours changed: for one, an aircraft
+    last heard low that reappears hours later climbing makes the departure
+    rule drop points from the old hour.
+  - Git only skips files the remote already has if the remote's commit is a
+    parent of what is pushed. An amended single commit has no parent, so git
+    sent everything. Each push therefore also sends, to `live-data-prev`, a
+    commit with the same files whose parent is the current `live-data` tip;
+    that makes the old tip's files count as already there.
+
+live.html fetches from raw.githubusercontent.com, so GitHub Pages is not
+rebuilt.
 
   python3 publish.py            build and push
   python3 publish.py --no-push  build only, and print a summary
@@ -31,6 +44,11 @@ EVENTS_DIR = os.environ.get("IADMAP_EVENTS_DIR", "/mnt/flightdata/iad-map/events
 DEPLOY_KEY = os.environ.get("IADMAP_DEPLOY_KEY", "/var/lib/iad-map/deploy_key")
 REMOTE = os.environ.get("IADMAP_REMOTE", "git@github.com:RDBFarm/iad-map.git")
 BRANCH = "live-data"
+PREV_BRANCH = "live-data-prev"   # carries the parent link; see the docstring
+SETTLE_S = 600   # an hour's file is final this long after the hour ends
+# the hour files already built final, one name per line; kept inside .git so
+# it is never pushed
+FINAL_LIST = os.path.join(WORK_DIR, ".git", "iad-map-final-hours")
 WX_URL = os.environ.get(
     "IADMAP_WX_URL",
     "https://aviationweather.gov/api/data/metar?ids=KIAD&format=json&hours=25")
@@ -437,8 +455,19 @@ def altim_lookup(wx):
     return altim_at
 
 
-def build(now, wx=None):
-    """Returns (index, {filename: bytes})."""
+def read_final():
+    """Hour files built after their hour was settled, still on disk."""
+    try:
+        with open(FINAL_LIST) as f:
+            names = f.read().split()
+    except OSError:
+        return set()
+    return {n for n in names if os.path.exists(os.path.join(WORK_DIR, n))}
+
+
+def build(now, wx=None, final=frozenset()):
+    """Returns (index, {filename: bytes}, names of the files now final).
+    Files named in `final` are read back from disk, not rebuilt."""
     end = int(now)
     start = end - SPAN_S
     first_hour = start - start % 3600
@@ -453,11 +482,17 @@ def build(now, wx=None):
     by_hour = {}
     for r in raw:
         by_hour.setdefault(r[0] - r[0] % 3600, []).append(r)
-    files, chunks = {}, []
+    files, chunks, now_final = {}, [], set()
     for hour_start in sorted(by_hour):
         name = "h/" + time.strftime("%Y%m%d%H", time.gmtime(hour_start)) + ".json"
-        body = json.dumps(hour_chunk(by_hour[hour_start], hour_start),
-                          separators=(",", ":")).encode()
+        if name in final:
+            with open(os.path.join(WORK_DIR, name), "rb") as f:
+                body = f.read()
+        else:
+            body = json.dumps(hour_chunk(by_hour[hour_start], hour_start),
+                              separators=(",", ":")).encode()
+        if hour_start + 3600 + SETTLE_S <= end:
+            now_final.add(name)
         files[name] = body
         chunks.append({"name": name, "hash": hashlib.sha1(body).hexdigest()[:12]})
     # Whole recorded tracks, every altitude and range, for drawing a selected
@@ -465,7 +500,9 @@ def build(now, wx=None):
     track_chunks = []
     try:
         if os.path.exists(DB_PATH):
-            tfiles = tracks.build(DB_PATH, WORK_DIR, start, end, aircraft_lookup.type_for)
+            tfiles, tfinal = tracks.build(DB_PATH, WORK_DIR, start, end,
+                                          aircraft_lookup.type_for, final, SETTLE_S)
+            now_final |= tfinal
             for name in sorted(tfiles):
                 files[name] = tfiles[name]
                 track_chunks.append({"name": name, "hash": hashlib.sha1(tfiles[name]).hexdigest()[:12]})
@@ -505,14 +542,16 @@ def build(now, wx=None):
         "chunks": chunks,
         "tracks": track_chunks,
     }
-    return index, files
+    return index, files, now_final & set(files)
 
 
 BRANCH_README = """# live-data
 
 Written by the ADS-B receiver at Red Devil Bison Farm every 15 minutes and
 force-pushed, so this branch only ever holds one commit: the latest 24 hours.
-Do not edit it; the next push replaces it. The code that writes it is in
+`live-data-prev` holds the same files on top of the previous push, only so
+that git uploads just what changed. Do not edit either; the next push
+replaces them. The code that writes it is in
 `pi/` on `main`, and `live.html` on `main` is the page that reads it.
 """
 
@@ -544,24 +583,36 @@ def write_tree(index, files):
         f.write(BRANCH_README)
 
 
-def push(index, files):
+def push(index, files, final):
     os.makedirs(WORK_DIR, exist_ok=True)
     if not os.path.isdir(os.path.join(WORK_DIR, ".git")):
         git("init", "-q")
         git("symbolic-ref", "HEAD", f"refs/heads/{BRANCH}")
     write_tree(index, files)
+    with open(FINAL_LIST + ".tmp", "w") as f:
+        f.write("".join(n + "\n" for n in sorted(final)))
+    os.replace(FINAL_LIST + ".tmp", FINAL_LIST)
     env = dict(os.environ, GIT_SSH_COMMAND=(
         f"ssh -i {DEPLOY_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "
         f"-o UserKnownHostsFile={os.path.dirname(DEPLOY_KEY)}/known_hosts"))
     stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(index["meta"]["end"]))
-    has_commit = subprocess.run(["git", "rev-parse", "-q", "--verify", "HEAD"], cwd=WORK_DIR,
-                                capture_output=True).returncode == 0
+    # The last commit pushed to live-data (the local branch moves only after
+    # a push succeeds, so it is what GitHub holds).
+    prev = subprocess.run(["git", "rev-parse", "-q", "--verify", f"refs/heads/{BRANCH}^{{commit}}"],
+                          cwd=WORK_DIR, capture_output=True, text=True).stdout.strip()
     git("add", "-A")
-    git("-c", "user.name=RDBF ADS-B receiver", "-c", "user.email=adsb-receiver@localhost",
-        "commit", "-q", *(["--amend"] if has_commit else []), "-m", f"Rolling 24 hours to {stamp}")
-    # The previous commit is still in the local object store, so git sees the
-    # remote already has every unchanged hour file and sends only the new ones.
-    git("push", "-q", "--force", REMOTE, f"HEAD:{BRANCH}", env=env)
+    tree = git("write-tree").strip()
+    ident = ["-c", "user.name=RDBF ADS-B receiver", "-c", "user.email=adsb-receiver@localhost"]
+    msg = f"Rolling 24 hours to {stamp}"
+    commit = git(*ident, "commit-tree", tree, "-m", msg).strip()
+    # Same files, with the previous push as parent: git then sends only the
+    # files that commit lacks. Without a parent link it sends every file.
+    carrier = git(*ident, "commit-tree", tree, *(["-p", prev] if prev else []),
+                  "-m", msg + " (on top of the previous push)").strip()
+    git("push", "-q", "--force", REMOTE, f"{commit}:refs/heads/{BRANCH}",
+        f"{carrier}:refs/heads/{PREV_BRANCH}", env=env)
+    git("update-ref", f"refs/heads/{BRANCH}", commit)
+    git("update-ref", f"refs/heads/{PREV_BRANCH}", carrier)
     git("reflog", "expire", "--expire=now", "--all")
     git("gc", "-q", "--prune=now")
 
@@ -600,7 +651,7 @@ def main():
             print(f"publish: {n} passes over the farm logged", flush=True)
         except Exception as e:  # never let this stop the map
             print("publish: farm-pass check failed:", e, flush=True)
-    index, files = build(time.time(), wx)
+    index, files, final = build(time.time(), wx, read_final())
     index["farm"]["summary"] = farm.summary(index["farm"]["passes"])
     enrich(index)
     m = index["meta"]
@@ -609,7 +660,7 @@ def main():
           f"{len(index['wx'])} weather reports, {len(files)} hour files", flush=True)
     if "--no-push" in sys.argv:
         return
-    push(index, files)
+    push(index, files, final)
     print("publish: pushed to", BRANCH, flush=True)
 
 
