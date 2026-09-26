@@ -1235,6 +1235,30 @@ function chunkColumns(c) {
   return col;
 }
 
+// Hour and track files, checked against the fingerprint live.json lists
+// (first 12 hex of the SHA-1 of the file, pi/publish.py). Just after an
+// upload GitHub's servers can briefly hand out the new live.json with an old
+// copy of a file; stored under the new fingerprint, that copy stayed until a
+// hard refresh (09-26: 11:30–11:45 showed no planes). A file that doesn't
+// match is fetched again, bypassing caches, and if it still doesn't it is
+// kept under its real fingerprint so the next refresh tries again.
+async function sha12(buf) {
+  if (!(window.crypto && crypto.subtle)) return null;   // can't check (e.g. some file:// pages)
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-1', buf));
+  return Array.from(d.slice(0, 6), b => b.toString(16).padStart(2, '0')).join('');
+}
+async function fetchChecked(c) {
+  let got = null;
+  for (const url of [DATA_BASE + c.name + '?h=' + c.hash, DATA_BASE + c.name + '?h=' + c.hash + '&t=' + Date.now()]) {
+    const r = await fetch(url, got ? {cache: 'no-store'} : {});
+    if (!r.ok) throw new Error(c.name + ' HTTP ' + r.status);
+    const buf = await r.arrayBuffer(), h = await sha12(buf);
+    got = {hash: h || c.hash, data: JSON.parse(new TextDecoder().decode(buf))};
+    if (got.hash === c.hash) break;
+  }
+  return got;
+}
+
 async function loadData() {
   let idx;
   try {
@@ -1243,10 +1267,8 @@ async function loadData() {
     idx = await r.json();
     await Promise.all(idx.chunks.map(async c => {
       if (chunkCache[c.name] && chunkCache[c.name].hash === c.hash) return;
-      const rc = await fetch(DATA_BASE + c.name + '?h=' + c.hash);
-      if (!rc.ok) throw new Error(c.name + ' HTTP ' + rc.status);
-      const body = await rc.json();
-      chunkCache[c.name] = {hash: c.hash, start: body.start, cols: chunkColumns(body)};
+      const {hash, data: body} = await fetchChecked(c);
+      chunkCache[c.name] = {hash, start: body.start, cols: chunkColumns(body)};
     }));
   } catch (e) {
     document.getElementById('updated').textContent = META ? 'update failed, showing ' + shortTime(SPAN) : 'no data yet (' + e.message + ')';
@@ -1643,8 +1665,7 @@ let trackRequest = 0;
 async function loadTrackFiles() {
   await Promise.all(TRACK_LIST.map(async c => {
     if (trackCache[c.name] && trackCache[c.name].hash === c.hash) return;
-    const r = await fetch(DATA_BASE + c.name + '?h=' + c.hash);
-    if (r.ok) trackCache[c.name] = {hash: c.hash, data: await r.json()};
+    try { trackCache[c.name] = await fetchChecked(c); } catch (e) {}
   }));
 }
 function clearTracks() { trackRequest++; trackLayer.clearLayers(); }
@@ -1730,8 +1751,7 @@ async function runNear(ev) {
   status.textContent = 'Loading paths…';
   await Promise.all(names.map(async c => {
     if (trackCache[c.name] && trackCache[c.name].hash === c.hash) return;
-    const r = await fetch(DATA_BASE + c.name + '?h=' + c.hash);
-    if (r.ok) trackCache[c.name] = {hash: c.hash, data: await r.json()};
+    try { trackCache[c.name] = await fetchChecked(c); } catch (e) {}
   }));
   const [lat0, lon0] = FARM_CENTER, kx = Math.cos(lat0 * Math.PI / 180) * 69.172, ky = 69.05;
   const byHex = {};
