@@ -675,6 +675,26 @@ function toggleCat(k) {
   if (activeCat.has(k)) activeCat.delete(k); else activeCat.add(k);
   drawCategories(); redraw();
 }
+// ── Remarkable aircraft: nicknames from plane-alert-db ────────────────────
+// pi/notable.json, built by tools/make_notable.py: government, military and
+// public-service aircraft only (Air Force One and Two, VIP transports,
+// police, medical...), never celebrity or private owners' jets (owner,
+// 2026-09-26). Community-written; ODbL, credited wherever it is shown.
+let NOTABLE = {};
+fetch('pi/notable.json').then(r => r.ok ? r.json() : null)
+  .then(d => { if (d && d.aircraft) { NOTABLE = d.aircraft; if (LAST_EVENTS) drawEvents(LAST_EVENTS); } }).catch(() => {});
+const notableOf = hex => NOTABLE[String(hex || '').toLowerCase()] || null;
+const starName = hex => { const n = notableOf(hex); return n ? '★ ' + n[0][0] : ''; };
+function notableRows(hex) {
+  const n = notableOf(hex);
+  if (!n) return '';
+  const [tags, type, cat, link] = n;
+  return row('Notable', '<b>★ ' + tags.map(esc).join(' · ') + '</b>' +
+      (type ? '<br>' + esc(type) : '') + '<br>' + esc(cat) +
+      (link ? ` · <a href="${esc(link)}" target="_blank" rel="noopener">about it ↗</a>` : '')) +
+    '<div class="note">Nickname from <a href="https://github.com/sdr-enthusiasts/plane-alert-db" target="_blank" rel="noopener">plane-alert-db</a>, a community list (ODbL).</div>';
+}
+
 function typesForName(query) {
   const q = query.trim().toUpperCase();
   const out = new Set(TYPE_ALIASES[q] || []);
@@ -1424,7 +1444,7 @@ function eventItems(ev) {
     const status = (e.code || '').startsWith('status-') ? e.code.slice(7) : null;
     if (!e.pushed && !(status && STATUS_SHOWN[status])) return;
     items.push({kind: 'emergency', raw: e, t: e.t, lat: e.lat, lon: e.lon,
-      label: (status ? 'status ' + status : e.code) + ' ' + (e.flight || e.hex.toUpperCase()),
+      label: (status ? 'status ' + status : e.code) + ' ' + (e.flight || e.hex.toUpperCase()) + (starName(e.hex) ? ' ' + starName(e.hex) : ''),
       detail: status ? 'ADS-B status "' + STATUS_SHOWN[status] + '" with ordinary squawk ' + (e.squawk || '?')
                      : e.code + (e.code === '7700' ? ' emergency' : e.code === '7600' ? ' radio failure' : ' unlawful interference')});
   });
@@ -1435,13 +1455,27 @@ function eventItems(ev) {
   // Only close approaches with at least one jet in them are shown (owner,
   // 2026-09-26): the rest were mostly flight-school props working near each
   // other. All are still logged on the Pi (events/close_approaches.jsonl).
-  let hidden = 0, noJet = 0;
+  // Radar echoes (owner, 2026-09-26): a target with only a temporary "~"
+  // address comes from FAA radar re-broadcast (TIS-B), not the aircraft's own
+  // transponder. One flying the other aircraft's course (within 30 degrees)
+  // at nearly its speed (within 30%) is almost always that aircraft's own
+  // radar return: 11 of the 13 such pairs in the first 35 h, 0.01-0.1 nm
+  // apart. It is hidden here, still logged on the Pi.
+  let hidden = 0, noJet = 0, echoes = 0;
   const isJet = x => ((TYPE_DESC[x && x.type] || '')[2] === 'J');
+  const isEcho = (a, b) => {
+    if (!(String(a.hex).startsWith('~') || String(b.hex).startsWith('~'))) return false;
+    if (a.track == null || b.track == null || !a.gs || !b.gs) return false;
+    const dt = Math.abs(a.track - b.track) % 360;
+    return Math.min(dt, 360 - dt) <= 30 && Math.min(a.gs, b.gs) / Math.max(a.gs, b.gs) >= 0.7;
+  };
+  const whoOf = x => (x.flight || String(x.hex).toUpperCase()) + (starName(x.hex) ? ' ' + starName(x.hex) : '');
   (ev.close_approaches || []).forEach(e => {
     const f = e.flags || [];
+    if (!f.includes('tcas') && isEcho(e.a, e.b)) { echoes++; return; }
     if (!f.includes('tcas') && (f.includes('near_airport') || f.includes('persistent') || f.includes('low'))) { hidden++; return; }
     if (!isJet(e.a) && !isJet(e.b)) { noJet++; return; }
-    const who = [e.a, e.b].map(x => x.flight || x.hex.toUpperCase()).join(' / ');
+    const who = [e.a, e.b].map(whoOf).join(' / ');
     items.push({kind: 'close', raw: e, t: e.cpa_t, lat: (e.a.lat + e.b.lat) / 2, lon: (e.a.lon + e.b.lon) / 2,
       label: 'Close: ' + who,
       detail: 'Close approach ' + e.h_nm + ' nm, ' + e.v_ft + ' ft' +
@@ -1450,14 +1484,14 @@ function eventItems(ev) {
   });
   (ev.farm_passes || []).forEach(p => {
     if (p.rule !== 'parcel' || p.prop === true || !(p.alt_agl < LOW_HIGHLIGHT_AGL)) return;
-    const who = p.flight || p.hex.toUpperCase();
+    const who = (p.flight || p.hex.toUpperCase()) + (starName(p.hex) ? ' ' + starName(p.hex) : '');
     items.push({kind: 'low', raw: p, t: p.t, lat: p.lat, lon: p.lon,
       label: who + ' ' + Math.round(p.alt_agl).toLocaleString() + ' ft',
       detail: 'Over the farm’s land, ' + Math.round(p.alt_agl).toLocaleString() + ' ft above the ground' +
         (p.type ? ' (' + p.type + ')' : ' (type unknown)')});
   });
   items.sort((a, b) => b.t - a.t);
-  return {items, hidden, noJet};
+  return {items, hidden, noJet, echoes};
 }
 
 function jumpToEvent(it) {
@@ -1539,10 +1573,12 @@ function aircraftBlock(x, t, heading) {
   const day = new Date(t * 1000).toISOString().slice(0, 10);
   const hex = (x.hex || '').replace('~', '');
   return `<div><h5>${esc(heading || call)}</h5>` +
+    notableRows(hex) +
     (heading ? row('Callsign', esc(call)) : '') +
     (x.operator ? row('Airline / operator', esc(x.operator) + (x.operator_radio ? '<br>radio callsign ' + esc(x.operator_radio) : '')) : '') +
     row('Registration', x.reg ? esc(x.reg) : !(x.hex || '').startsWith('~') && nNumber(hex)
-      ? esc(nNumber(hex)) + '<br>worked out from its address' : '—') +
+      ? esc(nNumber(hex)) + '<br>worked out from its address'
+      : notableOf(hex) && notableOf(hex)[4] ? esc(notableOf(hex)[4]) + '<br>from plane-alert-db' : '—') +
     row('Type', esc(x.type || 'unknown') + (x.type_name ? '<br>' + esc(x.type_name) : '')) +
     row('ICAO address', esc((x.hex || '').toUpperCase())) +
     row('Altitude', x.alt == null ? '—' : num(x.alt) + ' ft') +
@@ -1651,7 +1687,7 @@ async function openRouteCard(p) {
   const x = {flight, hex, type, type_name: TYPE_NAMES[type], alt: p[8], gs: p[7], track: p[9], vrate: p[10]};
   const card = document.getElementById('ev-card'), body = document.getElementById('ev-body');
   const draw = () => {
-    body.innerHTML = `<h4>✈ ${esc(flight || hex.toUpperCase())}</h4>` +
+    body.innerHTML = `<h4>✈ ${esc(flight || hex.toUpperCase())}${starName(hex) ? ' &nbsp;' + esc(starName(hex)) : ''}</h4>` +
       row('Seen here', when(t)) +
       row('Category', esc(CAT_LABEL[categoryOf(flight, type, hex)] || '—')) +
       (FARM_MODE ? row('Height above your ground', x.alt == null ? '—' : 'about ' + num(aglFt(x.alt, t)) + ' ft') : '') +
@@ -1668,7 +1704,7 @@ async function openRouteCard(p) {
   redraw();
   showTracks([flight, hex]);
   const op = await operatorFor(flight);
-  if (op && !card.hidden && body.querySelector('h4') && body.querySelector('h4').textContent === '✈ ' + (flight || hex.toUpperCase())) {
+  if (op && !card.hidden && body.querySelector('h4') && body.querySelector('h4').textContent.startsWith('✈ ' + (flight || hex.toUpperCase()))) {
     x.operator = op[0]; x.operator_radio = op[2]; draw();
   }
 }
@@ -1679,7 +1715,7 @@ function closeEventCard() {
 
 function drawEvents(ev) {
   eventLayer.clearLayers();
-  const all = eventItems(ev || {}), hidden = all.hidden, noJet = all.noJet;
+  const all = eventItems(ev || {}), hidden = all.hidden, noJet = all.noJet, echoes = all.echoes;
   const dismissed = all.items.filter(it => hiddenEvents.has(eventKey(it)));
   const items = showDismissed ? all.items : all.items.filter(it => !hiddenEvents.has(eventKey(it)));
   const list = document.getElementById('events-list');
@@ -1687,22 +1723,23 @@ function drawEvents(ev) {
   items.forEach(it => {
     const row = document.createElement('div');
     row.className = 'search-result';
-    row.innerHTML = `<span><span class="sr-flight">${EV_SYMBOL[it.kind]} ${it.label}</span></span>
+    row.innerHTML = `<span><span class="sr-flight">${EV_SYMBOL[it.kind]} ${esc(it.label)}</span></span>
       <span class="sr-time">${shortTime((it.t - META.start) / 60)}</span>`;
     row.title = it.detail;
     row.onclick = () => jumpToEvent(it);
     list.appendChild(row);
     if (it.lat == null) return;
     L.marker([it.lat, it.lon], {icon: L.divIcon({className: 'ev-icon ev-' + it.kind,
-        html: `<div>${EV_SYMBOL[it.kind]} ${it.label}</div>`, iconSize: null, iconAnchor: [0, 10]})})
-      .bindTooltip(it.detail + ' · ' + shortTime((it.t - META.start) / 60))
+        html: `<div>${EV_SYMBOL[it.kind]} ${esc(it.label)}</div>`, iconSize: null, iconAnchor: [0, 10]})})
+      .bindTooltip(esc(it.detail) + ' · ' + shortTime((it.t - META.start) / 60))
       .on('click', () => jumpToEvent(it))
       .addTo(eventLayer);
   });
   const note = document.getElementById('events-note');
   note.textContent = (items.length ? '' : 'None. ') +
     (hidden ? hidden + ' close approach' + (hidden > 1 ? 'es' : '') + ' at airports, in formation or low-level not shown. ' : '') +
-    (noJet ? noJet + ' with no jet involved not shown. ' : '');
+    (noJet ? noJet + ' with no jet involved not shown. ' : '') +
+    (echoes ? echoes + ' radar echo' + (echoes > 1 ? 'es' : '') + ' of a single aircraft not shown. ' : '');
   if (dismissed.length) {
     const a = document.createElement('a');
     a.href = '#'; a.style.color = '#7ec8e3';
