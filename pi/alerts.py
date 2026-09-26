@@ -32,6 +32,15 @@ and "not concerning at all". Owner's decisions, 2026-09-24/25; "over the
 land" and height above ground replaced a 1 nm radius and reported altitude
 on 09-25.
 
+Also (owner, 2026-09-26: "an alert if it is within sight of the farm ... I
+could see it with my own eyes"): Air Force One and the doomsday planes
+(watch.json, from plane-alert-db) push once per visit when their straight-
+line distance from the farm, height included, is within SIGHT_MI -- or
+within KIAD's reported visibility when that is less than 10 miles. The alert
+says which way to look and how high. SIGHT_MI is an estimate of how far a
+big jet shows as a dot in clear air, not a measured figure; clouds between
+the farm and the aircraft are not known. Logged to events/sightings.jsonl.
+
 Other ADS-B emergency statuses (lifeguard, minfuel, downed, reserved) are
 logged but not pushed; the owner asked for the three squawks only. An episode
 ends after 10 minutes without the code, and a later one alerts again.
@@ -63,6 +72,12 @@ STATUS_WORDS = {"general": "general emergency", "nordo": "radio failure",
                 "minfuel": "minimum fuel", "downed": "downed aircraft", "reserved": "reserved"}
 WORK_DIR = os.environ.get("IADMAP_PUBLISH_DIR", os.path.join(DRIVE, "iad-map", "publish"))
 LOW_PASS_REPEAT_S = 600
+SIGHT_MI = 12            # statute miles, straight line; an estimate, see above
+SIGHT_CONFIRM_READS = 2  # in range on this many reads in a row before it counts
+SIGHT_GAP_S = 1800       # out of range this long ends a visit; the next one alerts again
+WATCH_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watch.json")
+COMPASS16 = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+             "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
 
 
 def git(*args, check=True):
@@ -147,6 +162,8 @@ def who_lines(ev):
 def compose(ev, test=False):
     if ev.get("kind") == "low_pass":
         return compose_low_pass(ev)
+    if ev.get("kind") == "sighting":
+        return compose_sighting(ev)
     code = ev["code"]
     what = SQUAWKS.get(code) or STATUS_WORDS.get(ev.get("emergency"), ev.get("emergency") or "")
     who, op, idlines = who_lines(ev)
@@ -227,23 +244,110 @@ def actype(ac):
     return ac.get("t") or aircraft_lookup.type_for(ac.get("hex"))
 
 
-_ALTIM = {"at": 0, "hpa": None}
+_ALTIM = {"at": 0, "hpa": None, "vis": None}
+
+
+def _refresh_wx():
+    """KIAD's latest altimeter setting (hPa) and visibility (statute miles)
+    from the map build's weather, refreshed every 5 minutes; None if missing
+    or over 3 hours old."""
+    now = time.time()
+    if now - _ALTIM["at"] > 300:
+        _ALTIM.update(at=now, hpa=None, vis=None)
+        try:
+            with open(os.path.join(WORK_DIR, "live.json")) as f:
+                wx = [w for w in json.load(f).get("wx", []) if w.get("epoch")]
+            recent = [w for w in wx if now - w["epoch"] < 3 * 3600]
+            alt = [w for w in recent if w.get("altim_hpa")]
+            vis = [w for w in recent if isinstance(w.get("vsby"), (int, float))]
+            _ALTIM["hpa"] = alt[-1]["altim_hpa"] if alt else None
+            _ALTIM["vis"] = vis[-1]["vsby"] if vis else None
+        except (OSError, ValueError):
+            pass
 
 
 def current_altim():
-    """KIAD's latest altimeter setting (hPa) from the map build's weather,
-    refreshed every 5 minutes; None if missing or over 3 hours old."""
-    now = time.time()
-    if now - _ALTIM["at"] > 300:
-        _ALTIM["at"], _ALTIM["hpa"] = now, None
-        try:
-            with open(os.path.join(WORK_DIR, "live.json")) as f:
-                wx = [w for w in json.load(f).get("wx", []) if w.get("altim_hpa") and w.get("epoch")]
-            if wx and now - wx[-1]["epoch"] < 3 * 3600:
-                _ALTIM["hpa"] = wx[-1]["altim_hpa"]
-        except (OSError, ValueError):
-            pass
+    _refresh_wx()
     return _ALTIM["hpa"]
+
+
+def current_visibility():
+    _refresh_wx()
+    return _ALTIM["vis"]
+
+
+def load_watch():
+    try:
+        with open(WATCH_JSON) as f:
+            return {h.lower(): v for h, v in json.load(f)["aircraft"].items()}
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+def sight_limit_mi():
+    """SIGHT_MI, or KIAD's visibility when it is reported below 10 miles
+    (10 means "10 or more" in a METAR)."""
+    vis = current_visibility()
+    return min(SIGHT_MI, vis) if vis is not None and vis < 10 else SIGHT_MI
+
+
+def sighting(ac, watch):
+    """For a watched aircraft with a fresh position: (slant_mi, horiz_mi,
+    bearing, elevation_deg, agl_ft); None otherwise."""
+    h = (ac.get("hex") or "").lower()
+    alt = ac.get("alt_baro")
+    if h not in watch or ac.get("lat") is None or ac.get("seen_pos", 99) > 10:
+        return None
+    nm, brg = dist_bearing(farm.FARM[0], farm.FARM[1], ac["lat"], ac["lon"])
+    horiz_mi = nm * 1.15078
+    if alt == "ground":
+        agl = 0
+    elif isinstance(alt, (int, float)):
+        agl = max(0, farm.height_agl(alt, ac["lat"], ac["lon"], current_altim()) or 0)
+    else:
+        return None
+    slant = math.hypot(horiz_mi, agl / 5280)
+    elev = math.degrees(math.atan2(agl, horiz_mi * 5280)) if horiz_mi or agl else 90
+    return slant, horiz_mi, brg, elev, agl
+
+
+def sighting_event(ac, now, s, watch, limit):
+    slant, horiz, brg, elev, agl = s
+    name, reg, type_name = watch[(ac.get("hex") or "").lower()]
+    return {"kind": "sighting", "t": int(now), "utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now)),
+            "hex": ac.get("hex", ""), "flight": (ac.get("flight") or "").strip(), "type": actype(ac),
+            "name": name, "reg": reg, "type_name": type_name,
+            "slant_mi": round(slant, 1), "horiz_mi": round(horiz, 1), "bearing": round(brg),
+            "elev_deg": round(elev), "agl": round(agl), "alt": ac.get("alt_baro"),
+            "gs": ac.get("gs"), "track": ac.get("track"), "lat": ac["lat"], "lon": ac["lon"],
+            "limit_mi": limit, "visibility_mi": current_visibility(),
+            "mlat": 1 if "lat" in (ac.get("mlat") or []) else 0}
+
+
+def compose_sighting(ev):
+    look = COMPASS16[round(ev["bearing"] / 22.5) % 16]
+    heading = (f", heading {COMPASS16[round(ev['track'] / 22.5) % 16]}" if ev.get("track") is not None else "")
+    who = ev["reg"] or ev.get("flight") or ev["hex"].upper()
+    title = (f"👀 {ev['name']} ({who}) within sight of the farm: look {look}, "
+             f"about {ev['elev_deg']}° up, {ev['slant_mi']:.0f} mi away")
+    body = "\n".join([
+        f"@RDBFarm — {ev['name']} ({who}, {ev['type_name']}) came within sight range of the farm at {ev['utc']} UTC.",
+        "",
+        f"- **Where to look:** {look} (bearing {ev['bearing']}°), about {ev['elev_deg']}° above the horizon",
+        f"- **Distance:** {ev['slant_mi']:.1f} miles in a straight line ({ev['horiz_mi']:.1f} miles across the ground)",
+        f"- **Height:** about {ev['agl']:,} ft above the farm's ground{heading}"
+        + (f", {ev['gs']:.0f} kt" if ev.get("gs") is not None else ""),
+        f"- **Callsign:** {ev.get('flight') or 'not broadcast'}; ICAO {ev['hex'].upper()}",
+        "",
+        f"[ADS-B Exchange](https://globe.adsbexchange.com/?icao={ev['hex']}) · "
+        f"[Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao={ev['hex']}) · "
+        "[Live map](https://rdbfarm.github.io/iad-map/live.html)",
+        "",
+        f"_Automatic alert from `pi/alerts.py`: within {ev['limit_mi']:g} miles"
+        + (f" (KIAD visibility {ev['visibility_mi']:g} mi)" if ev.get("visibility_mi") is not None and ev["visibility_mi"] < 10 else "")
+        + ". That range is an estimate of how far a big jet shows as a dot in clear air; "
+        "cloud between the farm and the aircraft isn't known. Once per visit._"])
+    return title, body
 
 
 def low_pass_candidate(ac, prev):
@@ -292,6 +396,9 @@ def watch():
     last_pos = {}    # hex -> (t, lat, lon, alt) from the previous read
     low_last = {}    # hex -> time of last low-pass push
     low_logged = {}  # hex -> time of last low-pass logged without a push
+    sight_streak = {}  # hex -> consecutive reads in sight range
+    sight_last = {}    # hex -> last time in sight range, for the visit it alerted
+    watch_list = load_watch()
     pending = False
     rx = receiver_position()
     while True:
@@ -304,6 +411,7 @@ def watch():
             data = {"aircraft": []}
         now = data.get("now", started)
         seen_now = set()
+        streak_now = {}   # sight_streak for this read only: an aircraft not heard starts again
         for ac in data.get("aircraft", []):
             if ac.get("seen", 99) > 10:
                 continue
@@ -313,6 +421,23 @@ def watch():
                 prev = None
             if ac.get("lat") is not None and isinstance(ac.get("alt_baro"), (int, float)):
                 last_pos[h] = (now, ac["lat"], ac["lon"], ac["alt_baro"])
+            s = sighting(ac, watch_list)
+            limit = sight_limit_mi()
+            if s and s[0] <= limit:
+                streak_now[h] = sight_streak.get(h, 0) + 1
+                if h in sight_last:
+                    sight_last[h] = now                   # same visit, already alerted
+                elif streak_now[h] >= SIGHT_CONFIRM_READS:
+                    sight_last[h] = now
+                    ev = sighting_event(ac, now, s, watch_list, limit)
+                    ev["pushed"] = True
+                    append_event(ev, "sightings.jsonl")
+                    print("alerts: sighting", ev["name"], ev["reg"], ev["slant_mi"], "mi", flush=True)
+                    try:
+                        queue_alert(ev)
+                        pending = True
+                    except (OSError, subprocess.SubprocessError) as e:
+                        print("alerts: could not queue alert:", e, flush=True)
             where = low_pass_candidate(ac, prev)
             if where:
                 push = low_pass_should_push(ac, where[3])
@@ -360,6 +485,8 @@ def watch():
         last_pos = {h: v for h, v in last_pos.items() if now - v[0] <= farm.PREV_MAX_S}
         low_last = {h: t for h, t in low_last.items() if now - t <= LOW_PASS_REPEAT_S}
         low_logged = {h: t for h, t in low_logged.items() if now - t <= LOW_PASS_REPEAT_S}
+        sight_streak = streak_now
+        sight_last = {h: t for h, t in sight_last.items() if now - t <= SIGHT_GAP_S}
         for key, last in list(active.items()):
             if now - last > EPISODE_GAP_S:
                 del active[key]

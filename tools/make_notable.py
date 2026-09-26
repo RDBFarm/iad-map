@@ -18,6 +18,10 @@ from pathlib import Path
 
 URL = "https://raw.githubusercontent.com/sdr-enthusiasts/plane-alert-db/main/plane-alert-db.csv"
 OUT = Path(__file__).resolve().parent.parent / "pi" / "notable.json"
+# The Pi pushes a phone alert when one of these is within sight of the farm
+# (pi/alerts.py; owner, 2026-09-26: "For AF1 and Doomsday").
+WATCH_OUT = OUT.with_name("watch.json")
+WATCH_TAGS = {"Air Force One": "Air Force One", "Doomsday Plane": "Doomsday plane"}
 
 KEEP = {
     # government
@@ -57,7 +61,17 @@ def main():
         "_fields": ["tags", "type", "category", "link", "registration"],
         "aircraft": dict(sorted(out.items())),
     }, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
-    print(f"wrote {OUT.name}: {len(out)} aircraft")
+    watch = {}
+    for hexid, (tags, type_, cat, link, reg) in out.items():
+        for tag, name in WATCH_TAGS.items():
+            if tag in tags:
+                watch[hexid] = [name, reg, type_]
+    WATCH_OUT.write_text(json.dumps({
+        "_source": "Aircraft tagged Air Force One or Doomsday Plane in plane-alert-db (ODbL 1.0); "
+                   "built by tools/make_notable.py.",
+        "_fields": ["name", "registration", "type"],
+        "aircraft": watch}, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    print(f"wrote {OUT.name}: {len(out)} aircraft; {WATCH_OUT.name}: {len(watch)} watched")
 
 
 if __name__ == "__main__":
