@@ -41,15 +41,24 @@ says which way to look and how high. SIGHT_MI is an estimate of how far a
 big jet shows as a dot in clear air, not a measured figure; clouds between
 the farm and the aircraft are not known. Logged to events/sightings.jsonl.
 
+Every pushed alert is also sent as a text message when text.json is set up
+(owner, 2026-09-26): an email to his carrier's email-to-text address, sent
+through an email account used only for this. text.json lives in
+/var/lib/iad-map beside the deploy key, readable by the iadmap account only,
+and is written by --setup-text, never by hand and never in the repository.
+GitHub stays the written record. A text that fails is retried every minute.
+
 Other ADS-B emergency statuses (lifeguard, minfuel, downed, reserved) are
 logged but not pushed; the owner asked for the three squawks only. An episode
 ends after 10 minutes without the code, and a later one alerts again.
 Pushes that fail (no internet) are retried every read until they succeed.
 
-  python3 alerts.py          run
-  python3 alerts.py --test   push one alert marked TEST, then exit
+  python3 alerts.py              run
+  python3 alerts.py --test       push one alert marked TEST (and text it), then exit
+  python3 alerts.py --setup-text ask for the text-message settings, save them, send a test text
 """
-import json, math, os, subprocess, sys, time
+import getpass, json, math, os, smtplib, ssl, subprocess, sys, time
+from email.message import EmailMessage
 
 import aircraft_lookup
 import farm
@@ -75,6 +84,8 @@ LOW_PASS_REPEAT_S = 600
 SIGHT_MI = 12            # statute miles, straight line; an estimate, see above
 SIGHT_CONFIRM_READS = 2  # in range on this many reads in a row before it counts
 SIGHT_GAP_S = 1800       # out of range this long ends a visit; the next one alerts again
+TEXT_CONF = os.path.join(os.path.dirname(DEPLOY_KEY), "text.json")
+TEXT_MAX = 160           # one SMS
 WATCH_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watch.json")
 COMPASS16 = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
              "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
@@ -197,6 +208,78 @@ def compose(ev, test=False):
     return title, "\n".join(lines)
 
 
+_TEXT_PENDING = []
+_TEXT_RETRY = {"after": 0}
+TEXT_RETRY_S = 60
+
+
+def text_line(title):
+    """An alert title as one plain-text SMS: no emoji (they garble or split
+    a text), at most TEXT_MAX characters."""
+    for a, b in (("°", " deg"), ("—", "-"), ("–", "-"), ("🚨 ", ""), ("👀 ", ""), ("✈ ", ""), ("’", "'")):
+        title = title.replace(a, b)
+    title = title.encode("ascii", "ignore").decode().strip()
+    return title if len(title) <= TEXT_MAX else title[:TEXT_MAX - 3].rstrip() + "..."
+
+
+def load_text_conf():
+    try:
+        with open(TEXT_CONF) as f:
+            c = json.load(f)
+        return c if c.get("to") and c.get("user") and c.get("password") else None
+    except (OSError, ValueError):
+        return None
+
+
+def send_text(conf, line):
+    msg = EmailMessage()
+    msg["From"], msg["To"], msg["Subject"] = conf["user"], ", ".join(conf["to"]), ""
+    msg.set_content(line)
+    with smtplib.SMTP(conf.get("host", "smtp.gmail.com"), int(conf.get("port", 587)), timeout=30) as smtp:
+        smtp.starttls(context=ssl.create_default_context())
+        smtp.login(conf["user"], conf["password"])
+        smtp.send_message(msg)
+
+
+def send_texts_pending():
+    """Send queued texts. Returns True when nothing is left."""
+    conf = load_text_conf()
+    if not conf:
+        _TEXT_PENDING.clear()
+        return True
+    while _TEXT_PENDING:
+        try:
+            send_text(conf, _TEXT_PENDING[0])
+        except (OSError, smtplib.SMTPException) as e:
+            print("alerts: text failed, will retry:", str(e)[:200], flush=True)
+            return False
+        _TEXT_PENDING.pop(0)
+    return True
+
+
+def setup_text():
+    """Ask for the sending account and the phone's email-to-text address,
+    save them where only this account can read them, and send a test."""
+    print("Text messages are sent as email to your phone's email-to-text address,\n"
+          "through an email account used only for this (for Gmail: an app password).\n")
+    old = load_text_conf() or {}
+    user = input(f"Sending email address [{old.get('user', '')}]: ").strip() or old.get("user", "")
+    password = getpass.getpass("App password (not shown; Enter keeps the saved one): ").replace(" ", "") or old.get("password", "")
+    to = input(f"Send texts to, comma-separated [{', '.join(old.get('to', []))}]: ").strip()
+    to = [t.strip() for t in to.split(",") if t.strip()] or old.get("to", [])
+    conf = {"host": old.get("host", "smtp.gmail.com"), "port": old.get("port", 587),
+            "user": user, "password": password, "to": to}
+    fd = os.open(TEXT_CONF + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(conf, f)
+    os.replace(TEXT_CONF + ".tmp", TEXT_CONF)
+    try:
+        send_text(conf, "RDBF flight alerts: test text. Texts are set up.")
+        print("Saved, and a test text was sent. If it doesn't arrive in a minute, check the address.")
+    except (OSError, smtplib.SMTPException) as e:
+        print("Saved, but the test text failed:", e)
+
+
 def append_event(ev, name="emergencies.jsonl"):
     os.makedirs(EVENTS_DIR, exist_ok=True)
     with open(os.path.join(EVENTS_DIR, name), "a") as f:
@@ -215,6 +298,7 @@ def queue_alert(ev, test=False):
     git("add", name)
     git("-c", "user.name=RDBF ADS-B receiver", "-c", "user.email=adsb-receiver@localhost",
         "commit", "-q", "-m", title)
+    _TEXT_PENDING.append(text_line(title))
 
 
 def push_pending():
@@ -492,12 +576,18 @@ def watch():
                 del active[key]
         if pending:
             pending = not push_pending()
+        if _TEXT_PENDING and time.time() >= _TEXT_RETRY["after"]:
+            if not send_texts_pending():
+                _TEXT_RETRY["after"] = time.time() + TEXT_RETRY_S
         time.sleep(max(0.2, INTERVAL_S - (time.time() - started)))
 
 
 def main():
     if not os.path.ismount(DRIVE) and EVENTS_DIR.startswith(DRIVE):
         raise SystemExit(f"alerts: {DRIVE} is not mounted; not writing to the SD card instead")
+    if "--setup-text" in sys.argv:
+        setup_text()
+        return
     if "--test" in sys.argv:
         rx = receiver_position()
         ev = event_from({"hex": "000000", "flight": "TEST", "lat": rx[0], "lon": rx[1],
@@ -505,6 +595,8 @@ def main():
         ev["test"] = True
         queue_alert(ev, test=True)
         print("alerts: test alert", "pushed" if push_pending() else "NOT pushed — see the error above")
+        if load_text_conf():
+            print("alerts: test text", "sent" if send_texts_pending() else "NOT sent — see the error above")
         return
     watch()
 
