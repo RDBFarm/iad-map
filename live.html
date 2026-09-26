@@ -106,6 +106,19 @@
     padding:10px 14px; font-size:0.72rem; color:#ccd; min-width:175px;
   }
   #ap-panel h3 { font-size:0.75rem; color:#dde; margin-bottom:8px; }
+  #ap-more { margin-top:6px; border-top:1px solid rgba(255,255,255,0.08); padding-top:6px; }
+  #ap-more summary { cursor:pointer; color:#aab; margin-bottom:4px; }
+  .cat-count { font-size:0.62rem; color:#889; }
+  #cat-off { color:#ff9f40; font-weight:normal; }
+  .cat-caret { display:none; }
+  /* phone: the panel folds to a button so it doesn't sit under the search box */
+  @media (max-width: 600px) {
+    #ap-panel { right:10px; min-width:0; padding:8px 10px; z-index:1002; }
+    #ap-panel h3 { cursor:pointer; margin-bottom:0; }
+    #ap-panel.open h3 { margin-bottom:8px; }
+    .cat-caret { display:inline; }
+    #ap-panel:not(.open) #cat-list, #ap-panel:not(.open) #ap-more { display:none; }
+  }
   .ap-toggle {
     display:flex; align-items:center; gap:8px;
     padding:3px 0; cursor:pointer; user-select:none; -webkit-user-select:none;
@@ -173,6 +186,7 @@
     #hdr .sub { display:none; }
     #hdr .btn { padding:4px 8px; font-size:0.72rem; }
     #hdr h1 { font-size:0.9rem; }
+    #search-panel { width:calc(100% - 175px); }
   }
   html, body { overflow-x:hidden; }
   /* near-the-farm search */
@@ -269,7 +283,10 @@
 </div>
 
 <div id="ap-panel">
-  <h3>✈ Airport Filter</h3>
+  <h3 onclick="document.getElementById('ap-panel').classList.toggle('open')">✈ Show<span id="cat-off"></span><span class="cat-caret"> ▾</span></h3>
+  <div id="cat-list"></div>
+  <details id="ap-more">
+  <summary>Airports</summary>
   <div class="ap-toggle active" id="tog-KIAD" onclick="toggleAP(0,'KIAD')">
     <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">KIAD — Dulles</span>
@@ -311,6 +328,7 @@
     <div class="ap-dot" style="background:transparent;border:1.5px solid currentColor"></div>
     <span class="ap-name">En-route / high alt</span>
   </div>
+  </details>
 </div>
 
 <div id="wx">
@@ -398,13 +416,13 @@
 // risks the iOS memory limit that crashed the May 1 map. getPt(i) builds the
 // familiar array form for the few thousand points on screen.
 let PTS = null;      // {n, lat, lon, alt, tmin, ap, ac, gs, track, vrate}
-const ACS = [];      // aircraft table: [label, type, ga]; PTS.ac indexes it
+const ACS = [];      // aircraft table: [label, type, ga, hex, category]; PTS.ac indexes it
 const AC_INDEX = new Map();
 function getPt(i) {
   const a = ACS[PTS.ac[i]], nz = v => Number.isNaN(v) ? null : v;
   const alt = PTS.alt[i];
   return [PTS.lat[i], PTS.lon[i], Math.max(0, Math.min(1, 1 - alt / 15000)), PTS.tmin[i],
-          PTS.ap[i], a[0], a[1], nz(PTS.gs[i]), alt, nz(PTS.track[i]), nz(PTS.vrate[i]), a[2]];
+          PTS.ap[i], a[0], a[1], nz(PTS.gs[i]), alt, nz(PTS.track[i]), nz(PTS.vrate[i]), a[2], a[3]];
 }
 let WX = [];
 let META = null;
@@ -574,12 +592,73 @@ function doSearch(query) {
 // From pi/aircraft_types.json (ICAO names via tar1090-db), loaded once from
 // this site. A name matches at the start of any word, so "hawk" finds
 // Black Hawk but "ual" doesn't match inside a word.
-let TYPE_NAMES = {};
+let TYPE_NAMES = {}, TYPE_DESC = {};
 const TYPE_ALIASES = {        // common names that aren't in the ICAO list
   'V-TAIL': ['BE35'], 'VTAIL': ['BE35'], 'V TAIL': ['BE35'], 'V35': ['BE35'], 'V-35': ['BE35'],
 };
 fetch('pi/aircraft_types.json').then(r => r.ok ? r.json() : null)
-  .then(d => { if (d && d.names) TYPE_NAMES = d.names; }).catch(() => {});
+  .then(d => {
+    if (!d) return;
+    TYPE_NAMES = d.names || {}; TYPE_DESC = d.types || {};
+    ACS.forEach(a => { a[4] = categoryOf(a[0] === String(a[3]).toUpperCase() ? '' : a[0], a[1], a[3]); });
+    drawCategories(); if (PTS) redraw(); if (LAST_EVENTS) drawEvents(LAST_EVENTS);
+  }).catch(() => {});
+// ── Categories: each aircraft sits in exactly one, first match wins ───────
+// Military fighter: type is a fighter or fighter-style jet (list below, from
+//   general knowledge; T-38 trainers included, they fly like fighters).
+// Military: address in the US military block ADF7C8–AFFFFF (99% of the
+//   aircraft tar1090-db lists there are flagged military). Foreign military
+//   isn't recognised.
+// Helicopter: ICAO type descriptor starts with H.
+// Experimental: a kit-built type, matched by its builder's name. Kit planes
+//   whose type isn't reported, or is filed as another model, are missed.
+// Commercial: an airline-style callsign (three letters and a number) on
+//   anything but a piston plane, so charter jets count and flight schools
+//   flying Cessnas and Pipers under a company callsign don't.
+// Private: everything else, mostly N-number callsigns.
+const CATEGORIES = [
+  ['private', 'Private'], ['commercial', 'Commercial'], ['helicopter', 'Helicopters'],
+  ['military', 'Military'], ['fighter', 'Military fighters'], ['experimental', 'Experimental'],
+];
+const activeCat = new Set(CATEGORIES.map(c => c[0]));
+const FIGHTER_TYPES = new Set(['F4', 'F5', 'F14', 'F15', 'F16', 'F16X', 'F18H', 'F18S', 'F22', 'F35',
+  'F104', 'F111', 'F117', 'A10', 'T38', 'EUFI', 'RFAL', 'TOR', 'HAWK']);
+const KIT_BUILDERS = /^(VANS|SONEX|LANCAIR|GLASAIR|STODDARD-HAMILTON|KITFOX|SKYSTAR|ZENAIR|ZENITH|RANS|VELOCITY|RUTAN|QUICKIE|MURPHY|BEARHAWK|BUSHBY|KOLB|AVID|STEEN|THORP|JUST|TEAM|PROGRESSIVE AERODYNE|EUROPA|COZY|SEAREY)\b/;
+const KIT_EXTRA = new Set(['EAGL']);         // Christen Eagle (Christen also made the certified Husky)
+const NOT_KITS = new Set(['SS2', 'WHKN', 'WHK2', 'BOOM', 'ARES', 'BPOD', 'DEFI', 'VVIG']);  // Rutan one-offs
+function isMilitaryHex(hex) {
+  const h = parseInt(hex, 16);
+  return h >= 0xADF7C8 && h <= 0xAFFFFF;
+}
+function categoryOf(flight, type, hex) {
+  const desc = TYPE_DESC[type] || '', name = TYPE_NAMES[type] || '';
+  if (FIGHTER_TYPES.has(type)) return 'fighter';
+  if (isMilitaryHex(hex)) return 'military';
+  if (desc[0] === 'H') return 'helicopter';
+  if (KIT_EXTRA.has(type) || (KIT_BUILDERS.test(name) && !NOT_KITS.has(type))) return 'experimental';
+  if (/^[A-Z]{3}\d/.test(flight || '') && desc[2] !== 'P') return 'commercial';
+  return 'private';
+}
+function drawCategories() {
+  const counts = {};
+  if (PTS) {
+    const seen = new Set();
+    for (let i = 0; i < PTS.n; i++) seen.add(PTS.ac[i]);
+    const byHex = {};     // one aircraft can appear under several callsigns
+    seen.forEach(k => { byHex[ACS[k][3]] = ACS[k][4]; });
+    Object.values(byHex).forEach(c => { counts[c] = (counts[c] || 0) + 1; });
+  }
+  const off = CATEGORIES.length - activeCat.size;
+  document.getElementById('cat-off').textContent = off ? ' · ' + off + ' off' : '';
+  document.getElementById('cat-list').innerHTML = CATEGORIES.map(([k, label]) =>
+    `<div class="ap-toggle${activeCat.has(k) ? '' : ' off'}" onclick="toggleCat('${k}')">
+      <div class="ap-dot" style="background:${activeCat.has(k) ? 'currentColor' : 'transparent'};border:1.5px solid currentColor"></div>
+      <span class="ap-name">${label}</span><span class="cat-count">${counts[k] || 0}</span></div>`).join('');
+}
+function toggleCat(k) {
+  if (activeCat.has(k)) activeCat.delete(k); else activeCat.add(k);
+  drawCategories(); redraw();
+}
 function typesForName(query) {
   const q = query.trim().toUpperCase();
   const out = new Set(TYPE_ALIASES[q] || []);
@@ -961,7 +1040,7 @@ function isArrivalPt(p) {
 function getPtsInRange(lo, hi) {
   const a = lowerBound(lo), b = lowerBound(hi), out = [];
   for (let i = a; i < b; i++) {
-    if (!activeAP.has(PTS.ap[i])) continue;
+    if (!activeAP.has(PTS.ap[i]) || !activeCat.has(ACS[PTS.ac[i]][4])) continue;
     const p = getPt(i);
     if (isArrivalPt(p)) out.push(p);
   }
@@ -994,49 +1073,9 @@ map.on('click', function(e) {
     if (d < bestDist) { bestDist = d; best = p; }
   }
 
-  if (!best) {
-    popup.style.display = 'none';
-    popupVisible = false;
-    return;
-  }
+  if (!best) return;
 
-  // Point format:
-  // GA:         [lat, lon, intensity, time, ap_id, "GA"]
-  // Commercial: [lat, lon, intensity, time, ap_id, flight, ac_type, gs, alt, track, baro_rate]
-  const isGA    = best[5] === "GA" || best.length < 7;
-  const apName  = AP_NAMES[best[4]] || '—';
-  const timeStr = edtToDisplay(utcToEdt(best[3]));
-
-  if (isGA) {
-    document.getElementById('pop-title').textContent = 'General Aviation';
-    document.getElementById('pop-alt').textContent   = '—';
-    document.getElementById('pop-spd').textContent   = '—';
-  } else {
-    const flight  = best[5] || '—';
-    const acType  = best[6] || '—';
-    const gs      = best[7] ? best[7] + ' kt' : '—';
-    const alt     = best[8] ? best[8].toLocaleString() + ' ft' : '—';
-    const hdg      = best[9]  != null ? best[9] + '°' : '—';
-    const baro     = best[10] != null && best[10] !== 0
-                     ? (best[10] > 0 ? '↑' : '↓') + Math.abs(best[10]).toLocaleString() + ' fpm' : '';
-    document.getElementById('pop-title').textContent = flight + (acType ? '  ·  ' + acType : '');
-    document.getElementById('pop-alt').textContent   = alt + (baro ? '  ' + baro : '');
-    document.getElementById('pop-spd').textContent   = gs + (best[9] != null ? '  hdg ' + hdg : '');
-  }
-  document.getElementById('pop-ap').textContent   = apName;
-  document.getElementById('pop-time').textContent  = timeStr;
-
-  // Position popup near click but keep on screen
-  const mapDiv  = document.getElementById('map');
-  const mapRect = mapDiv.getBoundingClientRect();
-  let px = e.containerPoint.x + 14;
-  let py = e.containerPoint.y - 10;
-  if (px + 270 > mapRect.width)  px = e.containerPoint.x - 274;
-  if (py + 160 > mapRect.height) py = e.containerPoint.y - 164;
-  popup.style.left    = px + 'px';
-  popup.style.top     = (mapRect.top - mapDiv.offsetTop + py) + 'px';
-  popup.style.display = 'block';
-  popupVisible = true;
+  openRouteCard(best);
 });
 
 // Hide popup on map drag or double-click
@@ -1173,8 +1212,8 @@ function chunkColumns(c) {
   // Aircraft entries [hex, flight, type, ga] map into the shared ACS table.
   const n = c.pts.length, num = v => v === null || v === undefined ? NaN : v;
   const acMap = c.ac.map(a => {
-    const label = a[1] || a[0].toUpperCase(), key = label + '|' + a[2] + '|' + (a[3] ? 1 : 0);
-    if (!AC_INDEX.has(key)) { AC_INDEX.set(key, ACS.length); ACS.push([label, a[2], !!a[3]]); }
+    const label = a[1] || a[0].toUpperCase(), key = label + '|' + a[2] + '|' + (a[3] ? 1 : 0) + '|' + a[0];
+    if (!AC_INDEX.has(key)) { AC_INDEX.set(key, ACS.length); ACS.push([label, a[2], !!a[3], a[0], categoryOf(a[1], a[2], a[0])]); }
     return AC_INDEX.get(key);
   });
   const col = {n, lat: new Float32Array(n), lon: new Float32Array(n), alt: new Float32Array(n),
@@ -1248,6 +1287,7 @@ async function loadData() {
   FARM_INFO = idx.farm || null;
   LAST_EVENTS = Object.assign({}, idx.events, {farm_passes: idx.farm ? idx.farm.passes : []});
   drawEvents(LAST_EVENTS);
+  drawCategories();
   if (searchActive) doSearch(document.getElementById('search-input').value); else redraw();
 }
 drawLegend();
@@ -1292,10 +1332,15 @@ function eventItems(ev) {
   // ones were airliners kept miles apart by the system doing its job. They
   // are still logged on the Pi (events/tcas.jsonl), and a close approach in
   // which TCAS fired is still shown, flagged, below.
-  let hidden = 0;
+  // Only close approaches with at least one jet in them are shown (owner,
+  // 2026-09-26): the rest were mostly flight-school props working near each
+  // other. All are still logged on the Pi (events/close_approaches.jsonl).
+  let hidden = 0, noJet = 0;
+  const isJet = x => ((TYPE_DESC[x && x.type] || '')[2] === 'J');
   (ev.close_approaches || []).forEach(e => {
     const f = e.flags || [];
     if (!f.includes('tcas') && (f.includes('near_airport') || f.includes('persistent') || f.includes('low'))) { hidden++; return; }
+    if (!isJet(e.a) && !isJet(e.b)) { noJet++; return; }
     const who = [e.a, e.b].map(x => x.flight || x.hex.toUpperCase()).join(' / ');
     items.push({kind: 'close', raw: e, t: e.cpa_t, lat: (e.a.lat + e.b.lat) / 2, lon: (e.a.lon + e.b.lon) / 2,
       label: 'Close: ' + who,
@@ -1312,7 +1357,7 @@ function eventItems(ev) {
         (p.type ? ' (' + p.type + ')' : ' (type unknown)')});
   });
   items.sort((a, b) => b.t - a.t);
-  return {items, hidden};
+  return {items, hidden, noJet};
 }
 
 function jumpToEvent(it) {
@@ -1361,6 +1406,34 @@ function whereRows(lat, lon) {
   if (best) out += row('Nearest listed airport', esc(best[1]) + ', ' + num(best[0], 1) + ' nm');
   return out;
 }
+// US N-numbers are assigned to addresses A00001–ADF7C7 by a fixed rule, so the
+// registration can be worked out from the address. Checked against
+// tar1090-db: 392,062 of 392,213 agree; the rest look like re-registrations.
+const NL = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+function nSuffix(o) { if (!o) return ''; const c = NL[Math.floor((o - 1) / 25)], r = (o - 1) % 25; return r ? c + NL[r - 1] : c; }
+function nNumber(hex) {
+  let o = parseInt(hex, 16) - 0xA00001;
+  if (!(o >= 0 && o < 915399)) return null;
+  let out = 'N' + (Math.floor(o / 101711) + 1); o %= 101711;
+  for (const size of [10111, 951]) {
+    if (o <= 600) return out + nSuffix(o);
+    o -= 601; out += Math.floor(o / size); o %= size;
+  }
+  if (o <= 600) return out + nSuffix(o);
+  o -= 601; out += Math.floor(o / 35); o %= 35;
+  return o === 0 ? out : o <= 24 ? out + NL[o - 1] : out + (o - 25);
+}
+// Airline names for the route card: pi/operators.json, fetched on first use.
+let OPERATORS = null;
+async function operatorFor(flight) {
+  const m = /^([A-Z]{3})\d/.exec(flight || '');
+  if (!m) return null;
+  if (!OPERATORS) {
+    try { const r = await fetch('pi/operators.json'); OPERATORS = r.ok ? (await r.json()).operators || {} : {}; }
+    catch (e) { OPERATORS = {}; }
+  }
+  return OPERATORS[m[1]] || null;
+}
 function aircraftBlock(x, t, heading) {
   const call = x.flight || '(no callsign)';
   const day = new Date(t * 1000).toISOString().slice(0, 10);
@@ -1368,13 +1441,15 @@ function aircraftBlock(x, t, heading) {
   return `<div><h5>${esc(heading || call)}</h5>` +
     (heading ? row('Callsign', esc(call)) : '') +
     (x.operator ? row('Airline / operator', esc(x.operator) + (x.operator_radio ? '<br>radio callsign ' + esc(x.operator_radio) : '')) : '') +
-    row('Registration', esc(x.reg || '—')) +
+    row('Registration', x.reg ? esc(x.reg) : !(x.hex || '').startsWith('~') && nNumber(hex)
+      ? esc(nNumber(hex)) + '<br>worked out from its address' : '—') +
     row('Type', esc(x.type || 'unknown') + (x.type_name ? '<br>' + esc(x.type_name) : '')) +
     row('ICAO address', esc((x.hex || '').toUpperCase())) +
     row('Altitude', x.alt == null ? '—' : num(x.alt) + ' ft') +
     row('Ground speed', x.gs == null ? '—' : num(x.gs) + ' kt') +
     row('Heading', hdg(x.track)) +
-    row('Position from', x.mlat ? 'MLAT (worked out by receivers; less precise)' : 'its own GPS (ADS-B)') +
+    (x.vrate != null ? row('Climb / descent', x.vrate === 0 ? 'level' : (x.vrate > 0 ? '↑ ' : '↓ ') + num(Math.abs(x.vrate)) + ' ft/min') : '') +
+    (x.mlat === undefined ? '' : row('Position from', x.mlat ? 'MLAT (worked out by receivers; less precise)' : 'its own GPS (ADS-B)')) +
     (hex && !x.hex.startsWith('~') ? `<div class="note"><a href="https://globe.adsbexchange.com/?icao=${esc(hex)}&amp;showTrace=${day}" target="_blank" rel="noopener">Track on ADS-B Exchange ↗</a></div>` : '') +
     '</div>';
 }
@@ -1466,6 +1541,37 @@ function openEventCard(it) {
   document.getElementById('search-clear').style.display = 'block';
   showTracks(who);
 }
+// Tapping a dot on a route: the same aircraft details as an event card, for
+// that aircraft at that moment, and its whole path drawn.
+const CAT_LABEL = Object.fromEntries(CATEGORIES.map(c => c[0] === 'helicopter' ? ['helicopter', 'Helicopter'] : c));
+async function openRouteCard(p) {
+  const label = p[5], type = p[6], hex = p[12] || '';
+  const flight = label && label !== hex.toUpperCase() ? label : '';
+  const t = META.start + p[3] * 60;
+  const x = {flight, hex, type, type_name: TYPE_NAMES[type], alt: p[8], gs: p[7], track: p[9], vrate: p[10]};
+  const card = document.getElementById('ev-card'), body = document.getElementById('ev-body');
+  const draw = () => {
+    body.innerHTML = `<h4>✈ ${esc(flight || hex.toUpperCase())}</h4>` +
+      row('Seen here', when(t)) +
+      row('Category', esc(CAT_LABEL[categoryOf(flight, type, hex)] || '—')) +
+      row('Height above your ground', x.alt == null ? '—' : 'about ' + num(aglFt(x.alt, t)) + ' ft') +
+      whereRows(p[0], p[1]) +
+      aircraftBlock(x, t, 'Aircraft') +
+      '<div class="note">The white line is its whole path in the last 24 hours.</div>';
+  };
+  draw();
+  card.hidden = false;
+  searchActive = true;
+  highlightTypes = new Set();
+  highlightFlights = new Set([label]);
+  document.getElementById('search-clear').style.display = 'block';
+  redraw();
+  showTracks([flight, hex]);
+  const op = await operatorFor(flight);
+  if (op && !card.hidden && body.querySelector('h4') && body.querySelector('h4').textContent === '✈ ' + (flight || hex.toUpperCase())) {
+    x.operator = op[0]; x.operator_radio = op[2]; draw();
+  }
+}
 function closeEventCard() {
   document.getElementById('ev-card').hidden = true;
   clearSearch();
@@ -1473,7 +1579,7 @@ function closeEventCard() {
 
 function drawEvents(ev) {
   eventLayer.clearLayers();
-  const all = eventItems(ev || {}), hidden = all.hidden;
+  const all = eventItems(ev || {}), hidden = all.hidden, noJet = all.noJet;
   const dismissed = all.items.filter(it => hiddenEvents.has(eventKey(it)));
   const items = showDismissed ? all.items : all.items.filter(it => !hiddenEvents.has(eventKey(it)));
   const list = document.getElementById('events-list');
@@ -1495,7 +1601,8 @@ function drawEvents(ev) {
   });
   const note = document.getElementById('events-note');
   note.textContent = (items.length ? '' : 'None. ') +
-    (hidden ? hidden + ' close approach' + (hidden > 1 ? 'es' : '') + ' at airports, in formation or low-level not shown. ' : '');
+    (hidden ? hidden + ' close approach' + (hidden > 1 ? 'es' : '') + ' at airports, in formation or low-level not shown. ' : '') +
+    (noJet ? noJet + ' with no jet involved not shown. ' : '');
   if (dismissed.length) {
     const a = document.createElement('a');
     a.href = '#'; a.style.color = '#7ec8e3';

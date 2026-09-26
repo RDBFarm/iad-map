@@ -38,9 +38,13 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
   low-level and MLAT. They are close approaches, not confirmed near misses.
   TCAS resolution advisories, if this readsb reports them, go to
   `events/tcas.jsonl`. The live map marks emergencies, TCAS advisories and
-  unflagged close approaches, and lists them in the Events panel. Tapping one opens a detail card; "Hide
+  unflagged close approaches with at least one jet in them, and lists them in the Events panel. Tapping one opens a detail card; "Hide
 from the map" removes it for that browser (remembered between visits), and
 "Show N hidden" brings hidden ones back.
+Tapping a dot on any route opens the same card for that aircraft. The panel
+on the right shows or hides aircraft by category (private, commercial,
+helicopters, military, military fighters, experimental); the rules are in
+comments above `categoryOf` in `live.html`.
 
 - `farm.py` logs every aircraft whose path crosses the farm's land (the
   parcel boundary), at any altitude, to `events/farm_passes.jsonl`, with its
