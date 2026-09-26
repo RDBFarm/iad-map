@@ -290,6 +290,11 @@ def is_arrival(alt, gs, baro_rate, track, lat, lon, category, flight=""):
 CLIMB_STEPS = 3
 CLIMB_MIN_FT = 100
 CLIMB_SPACING_S = 10
+# A rise only counts as part of a climb when the two thinned points are at
+# most this far apart (owner, 09-26). Without it, an aircraft last heard low
+# that reappeared hours later higher up read as one climb, and its earlier
+# arrival points were dropped.
+CLIMB_MAX_GAP_S = 60
 
 
 def departure_points(rows):
@@ -308,7 +313,8 @@ def departure_points(rows):
             if pts[i][1] < 500:
                 climb_count = 0
                 j = i + 1
-                while j < len(pts) and pts[j][1] > pts[j - 1][1] + CLIMB_MIN_FT:
+                while (j < len(pts) and pts[j][1] > pts[j - 1][1] + CLIMB_MIN_FT
+                       and pts[j][0] - pts[j - 1][0] <= CLIMB_MAX_GAP_S):
                     climb_count += 1
                     j += 1
                 if climb_count >= CLIMB_STEPS:
