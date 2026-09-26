@@ -145,6 +145,7 @@ receiver: 291 aircraft (271 with position), ~1,683 messages/sec.
 - Web UI: `http://192.168.1.190/tar1090`. SSH: `ssh pi@192.168.1.190` (the Mac's known_hosts also has it as `192.168.2.3` from bench setup — same host key).
 - The Pi is **not reachable from the internet**; cloud-side tools can't pull from it — the Pi pushes.
 - Safe shutdown: `sudo shutdown -h now`.
+- **Wi-Fi is switched off on purpose** (rfkill; decided in his HubDuo conversation, 09-26: the Pi is on Ethernet). The login banner "Wi-Fi is currently blocked by rfkill" is expected; don't unblock it.
 
 ### Receiver location
 - Get exact antenna coordinates from the ADSBx config on the Pi rather than guessing.
@@ -185,6 +186,7 @@ See `README.md` for how to install. In short:
 
 ### After installing, check
 - Done 09-24: aircraft types come through (via the lookup); the aviationweather.gov weather feed parses.
+- Done 09-26: installer re-run for the parcel / height-above-ground change. USGS reachable from the Pi: `farm ground: 25 points, 287-355 ft, mean 334 ft` (the fallback had been 380 ft). Lookup rebuilt: 618,617 aircraft, 490,518 with a type. First publish after it (11:45 AM): `farm.ground_ft` 340 (USGS), all 24 weather reports carry `altim_hpa` (so the METAR `altim` field name was right; 1012.6 hPa = 29.90 inHg), first parcel pass QTR3G at ~9,460 ft above the ground. Older passes under the 1 nm rule age out of the 24 h window.
 - Still to check: drive growth per day, publisher memory on the Pi, `live.html` on the iPad (see §0).
 
 ### Emergencies and close approaches (built and installed 09-24)
