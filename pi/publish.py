@@ -6,8 +6,18 @@ Run every 15 minutes by iad-map-publish.timer. Reads the collector's log
 of Dulles at or below 15,000 ft -- and writes, on the `live-data` branch of RDBFarm/iad-map:
 
   live.json        what live.html reads first: the window, counts, KIAD
-                   weather, and the list of hour files with a hash of each
-  h/<hour>.json    one file per UTC hour of positions
+                   weather, the list of hour files with a hash of each, and
+                   the finished days kept
+  h/<day>/<hour>.json   one file per UTC hour of positions (t/ the same for
+                   whole tracks), a folder per UTC day
+  d/<date>.json    one per finished local (Eastern) day: its hour files,
+                   weather and events, written once just after midnight
+
+Finished hours are kept for KEEP_DAYS days (owner, 2026-09-26: a longer
+timeline, "as long as the file sizes don't change"). They are already
+frozen and pushed once, so keeping them costs no upload; the per-day folders
+keep each push's folder listings as short as with 24 hours. Kept files stay
+on disk and are never read back into memory (30 days is ~1.5 GB).
 
 The branch is kept to a single commit, replaced and force-pushed each run,
 so the repository does not grow. Two things keep each push down to what
@@ -31,7 +41,8 @@ rebuilt.
   python3 publish.py            build and push
   python3 publish.py --no-push  build only, and print a summary
 """
-import hashlib, json, math, os, sqlite3, subprocess, sys, time, urllib.request
+import calendar, datetime, hashlib, json, math, os, re, sqlite3, subprocess, sys, time, urllib.request
+from zoneinfo import ZoneInfo
 
 import aircraft_lookup
 import farm
@@ -53,6 +64,10 @@ WX_URL = os.environ.get(
     "IADMAP_WX_URL",
     "https://aviationweather.gov/api/data/metar?ids=KIAD&format=json&hours=25")
 SPAN_S = 24 * 3600
+KEEP_DAYS = 30              # finished local days kept for the map's day picker
+LOCAL = ZoneInfo("America/New_York")
+# a full repack once a day; otherwise only unreachable loose objects are pruned
+GC_STAMP = os.path.join(WORK_DIR, ".git", "iad-map-last-gc")
 
 # ── Classification: copied unchanged from render_github.py (the script that
 # builds the May 1 map, as of the copy last modified 2026-09-03), so the live
@@ -384,10 +399,12 @@ COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
            "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
 
 
-def fetch_weather(start):
-    """KIAD METARs from aviationweather.gov. Any failure gives no weather."""
+def fetch_weather(start, hours=None):
+    """KIAD METARs from aviationweather.gov. Any failure gives no weather.
+    `hours` widens the look-back (for a finished day's file)."""
+    url = re.sub(r"hours=\d+", f"hours={int(hours)}", WX_URL) if hours else WX_URL
     try:
-        req = urllib.request.Request(WX_URL, headers={"User-Agent": "rdbf-iad-map"})
+        req = urllib.request.Request(url, headers={"User-Agent": "rdbf-iad-map"})
         with urllib.request.urlopen(req, timeout=20) as r:
             obs = json.load(r)
     except Exception as e:
@@ -462,13 +479,105 @@ def altim_lookup(wx):
 
 
 def read_final():
-    """Hour files built after their hour was settled, still on disk."""
+    """Files built after their hour was settled, still on disk. Hour files in
+    the flat layout used until 2026-09-26 (h/<YYYYMMDDHH>.json) are moved
+    into their day folder: same bytes, so nothing is uploaded again."""
     try:
         with open(FINAL_LIST) as f:
             names = f.read().split()
     except OSError:
         return set()
-    return {n for n in names if os.path.exists(os.path.join(WORK_DIR, n))}
+    out = set()
+    for n in names:
+        p = tracks.parse_name(n)
+        if p and "/" not in n[2:]:
+            new = tracks.hour_name(*p)
+            old_path, new_path = os.path.join(WORK_DIR, n), os.path.join(WORK_DIR, new)
+            if os.path.exists(old_path):
+                os.makedirs(os.path.dirname(new_path), exist_ok=True)
+                os.replace(old_path, new_path)
+            n = new
+        if os.path.exists(os.path.join(WORK_DIR, n)):
+            out.add(n)
+    return out
+
+
+def local_day(epoch):
+    return datetime.datetime.fromtimestamp(epoch, LOCAL).date()
+
+
+def day_bounds(date):
+    """Start and end (epoch) of a local calendar day; 23 or 25 h at DST."""
+    a = datetime.datetime.combine(date, datetime.time(), LOCAL)
+    b = datetime.datetime.combine(date + datetime.timedelta(days=1), datetime.time(), LOCAL)
+    return int(a.timestamp()), int(b.timestamp())
+
+
+def file_hash(path):
+    with open(path, "rb") as f:
+        return hashlib.sha1(f.read()).hexdigest()[:12]
+
+
+def kept_files(final, end):
+    """Frozen files old enough to have left the 24 h window but inside
+    KEEP_DAYS: kept on disk and in the branch as they are. Returns
+    ({name: None}, the oldest local date kept)."""
+    oldest = local_day(end) - datetime.timedelta(days=KEEP_DAYS)
+    keep_from = day_bounds(oldest)[0]
+    kept = {}
+    for n in final:
+        p = tracks.parse_name(n)
+        if p and p[1] >= keep_from:
+            kept[n] = None
+        elif n.startswith("d/"):
+            try:
+                if datetime.date.fromisoformat(n[2:12]) >= oldest:
+                    kept[n] = None
+            except ValueError:
+                pass
+    return kept, oldest
+
+
+def day_file(date, names, now, final_names):
+    """The index of one finished local day, from its hour files on disk."""
+    start, end = day_bounds(date)
+    chunks, trk, positions, aircraft, first = [], [], 0, set(), None
+    for n in sorted(names):
+        kind, hour = tracks.parse_name(n)
+        if not (start <= hour < end):
+            continue
+        path = os.path.join(WORK_DIR, n)
+        entry = {"name": n, "hash": file_hash(path)}
+        if kind == "h":
+            chunks.append(entry)
+            with open(path, "rb") as f:
+                body = json.load(f)
+            positions += len(body["pts"])
+            aircraft.update(a[0] for a in body["ac"])
+            first = hour if first is None else min(first, hour)
+        else:
+            trk.append(entry)
+    ev = {k: [e for e in proximity.recent(EVENTS_DIR, k + ".jsonl", start)
+              if start <= e.get("t", e.get("cpa_t", 0)) < end]
+          for k in ("emergencies", "close_approaches", "tcas")}
+    passes = [p for p in proximity.recent(EVENTS_DIR, "farm_passes.jsonl", start) if p.get("t", 0) < end]
+    wx = [w for w in fetch_weather(start, hours=math.ceil((now - start) / 3600) + 1) if w["epoch"] < end]
+    index = {
+        "meta": {"start": start, "end": end, "built": end, "span_min": (end - start) // 60,
+                 "positions": positions, "aircraft": len(aircraft), "date": date.isoformat(),
+                 # the day the archive began (or the Pi was off) may start late
+                 "first_hour": first},
+        "wx": wx,
+        "events": ev,
+        "farm": {"center": list(farm.FARM), "radius_nm": farm.FARM_RADIUS_NM,
+                 "ground_ft": farm.ground_ft(*farm.FARM)[0], "ground_basis": farm.ground_ft(*farm.FARM)[1],
+                 "passes": passes},
+        "chunks": chunks,
+        "tracks": trk,
+    }
+    index["farm"]["summary"] = farm.summary(passes)
+    enrich(index)
+    return json.dumps(index, separators=(",", ":")).encode()
 
 
 def build(now, wx=None, final=frozenset()):
@@ -490,7 +599,7 @@ def build(now, wx=None, final=frozenset()):
         by_hour.setdefault(r[0] - r[0] % 3600, []).append(r)
     files, chunks, now_final = {}, [], set()
     for hour_start in sorted(by_hour):
-        name = "h/" + time.strftime("%Y%m%d%H", time.gmtime(hour_start)) + ".json"
+        name = tracks.hour_name("h", hour_start)
         if name in final:
             with open(os.path.join(WORK_DIR, name), "rb") as f:
                 body = f.read()
@@ -567,14 +676,13 @@ def git(*args, env=None):
                           timeout=300, capture_output=True, text=True).stdout
 
 
-def write_tree(index, files):
-    for sub in ("h", "t"):
-        os.makedirs(os.path.join(WORK_DIR, sub), exist_ok=True)
-        for name in os.listdir(os.path.join(WORK_DIR, sub)):
-            if f"{sub}/{name}" not in files:
-                os.remove(os.path.join(WORK_DIR, sub, name))
+def write_files(files):
+    """Write the files that are held in memory (None = kept on disk as is)."""
     for name, body in files.items():
+        if body is None:
+            continue
         path = os.path.join(WORK_DIR, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         try:
             with open(path, "rb") as f:
                 if f.read() == body:
@@ -583,6 +691,21 @@ def write_tree(index, files):
             pass
         with open(path, "wb") as f:
             f.write(body)
+
+
+def write_tree(index, files):
+    """Everything in `files` on disk, everything else under h/ t/ d/ gone."""
+    for sub in ("h", "t", "d"):
+        top = os.path.join(WORK_DIR, sub)
+        os.makedirs(top, exist_ok=True)
+        for dirpath, dirnames, filenames in os.walk(top, topdown=False):
+            for fn in filenames:
+                full = os.path.join(dirpath, fn)
+                if os.path.relpath(full, WORK_DIR) not in files:
+                    os.remove(full)
+            if dirpath != top and not os.listdir(dirpath):
+                os.rmdir(dirpath)
+    write_files(files)
     with open(os.path.join(WORK_DIR, "live.json"), "w") as f:
         json.dump(index, f, separators=(",", ":"))
     with open(os.path.join(WORK_DIR, "README.md"), "w") as f:
@@ -620,7 +743,52 @@ def push(index, files, final):
     git("update-ref", f"refs/heads/{BRANCH}", commit)
     git("update-ref", f"refs/heads/{PREV_BRANCH}", carrier)
     git("reflog", "expire", "--expire=now", "--all")
-    git("gc", "-q", "--prune=now")
+    # Unreachable loose objects (old live.json, the current hour's earlier
+    # versions) every run; a full repack, which rewrites every kept file's
+    # objects, only once a day.
+    git("prune", "--expire=now")
+    try:
+        last_gc = os.path.getmtime(GC_STAMP)
+    except OSError:
+        last_gc = 0
+    if time.time() - last_gc > 20 * 3600:
+        git("gc", "-q", "--prune=now")
+        with open(GC_STAMP, "w"):
+            pass
+
+
+def archive(index, files, final, end):
+    """Add the kept days to what is published: frozen files older than the
+    24 h window (kept on disk, not read), a d/<date>.json for each finished
+    local day not written yet, and the list of days in live.json. Returns
+    the names final after this run."""
+    write_files(files)                       # day files read this run's hours from disk
+    kept, oldest = kept_files(final, end)
+    for n in kept:
+        files.setdefault(n, None)
+    final = set(final) | set(kept)
+    hour_names = [n for n in files if tracks.parse_name(n)]
+    date = oldest
+    while date < local_day(end):
+        name = f"d/{date.isoformat()}.json"
+        day_end = day_bounds(date)[1]
+        if name not in files and day_end + SETTLE_S <= end:
+            day_hours = [n for n in hour_names if n in final
+                         and day_bounds(date)[0] <= tracks.parse_name(n)[1] < day_end]
+            if any(n.startswith("h/") for n in day_hours):
+                try:
+                    files[name] = day_file(date, day_hours, end, final)
+                    final.add(name)
+                except Exception as e:     # never let this stop the map
+                    print(f"publish: day file {name} failed:", e, flush=True)
+        date += datetime.timedelta(days=1)
+    days = []
+    for n in sorted(f for f in files if f.startswith("d/")):
+        body = files[n]
+        h = hashlib.sha1(body).hexdigest()[:12] if body is not None else file_hash(os.path.join(WORK_DIR, n))
+        days.append({"date": n[2:12], "hash": h})
+    index["days"] = days
+    return final & set(files)
 
 
 def enrich(index):
@@ -657,13 +825,15 @@ def main():
             print(f"publish: {n} passes over the farm logged", flush=True)
         except Exception as e:  # never let this stop the map
             print("publish: farm-pass check failed:", e, flush=True)
-    index, files, final = build(time.time(), wx, read_final())
+    frozen = read_final()
+    index, files, final = build(time.time(), wx, frozen)
     index["farm"]["summary"] = farm.summary(index["farm"]["passes"])
     enrich(index)
+    final = archive(index, files, final | (frozen - set(files)), index["meta"]["end"])
     m = index["meta"]
     print(f"publish: {m['positions']} positions, {m['aircraft']} aircraft, "
           f"{m['mlat_positions']} MLAT positions, {m['aircraft_mlat_only']} aircraft seen only by MLAT, "
-          f"{len(index['wx'])} weather reports, {len(files)} hour files", flush=True)
+          f"{len(index['wx'])} weather reports, {len(files)} files, {len(index['days'])} days kept", flush=True)
     if "--no-push" in sys.argv:
         return
     push(index, files, final)

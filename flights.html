@@ -30,6 +30,9 @@
   @supports (height: 100dvh) {
     #map { bottom: 130px; }
   }
+  #day-pick { background:rgba(255,255,255,0.08); color:inherit; border:1px solid rgba(255,255,255,0.2);
+    border-radius:5px; font:inherit; padding:1px 4px; max-width:11em; }
+  #day-pick option { color:#111; }
   #controls {
     position:absolute; bottom:0; left:0; right:0; height:130px; z-index:1000;
     background:rgba(10,10,20,0.95); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
@@ -191,6 +194,10 @@
     #hdr .btn { padding:4px 8px; font-size:0.72rem; }
     #hdr h1 { font-size:0.9rem; }
     #search-panel { width:calc(100% - 175px); }
+    /* the day picker is wider than the old label: keep the clock on two lines */
+    #time-row { gap:10px; }
+    #clock { font-size:1.35rem; letter-spacing:1px; }
+    #day-pick { max-width:8.5em; }
   }
   html, body { overflow-x:hidden; }
   /* near-the-farm search */
@@ -280,7 +287,7 @@
   <div id="search-results"></div>
   <div id="events">
     
-    <h3>⚠ Events, last 24 h</h3>
+    <h3>⚠ Events, <span class="view-lbl">last 24 h</span></h3>
     <div id="events-list" style="max-height:160px;overflow-y:auto"></div>
     <div id="events-note"></div>
   </div>
@@ -375,7 +382,8 @@
   <div id="time-row">
     <div id="clock">—</div>
     <div>
-      <div id="date-lbl">Last 24 hours · Eastern time</div>
+      <div id="date-lbl"><select id="day-pick" onchange="pickDay(this.value)" aria-label="Which day">
+        <option value="">Last 24 hours</option></select> · Eastern time</div>
       <div id="period-lbl">🌙 Night</div>
     </div>
     <div id="pt-count">— positions visible</div>
@@ -388,7 +396,7 @@
   <div id="btn-row">
     <button class="btn" id="btn-play" onclick="togglePlay()">▶ Play</button>
     <button class="btn" onclick="jumpTo(0)">⏮</button>
-    <button class="btn" onclick="if (playing) togglePlay(); jumpTo(SPAN)">Now</button>
+    <button class="btn" onclick="goNow()">Now</button>
     <button class="btn" onclick="stepMin(-60)">−1h</button>
     <button class="btn" onclick="stepMin(60)">+1h</button>
     <span class="ctrl-lbl" style="margin-left:8px">Speed: <b id="speed-val">8×</b></span>
@@ -1246,12 +1254,60 @@ async function fetchChecked(c) {
   return got;
 }
 
+// ── Days: the rolling 24 hours, or one finished day from the Pi's archive ──
+// live.json lists the finished local days kept (pi/publish.py, KEEP_DAYS);
+// each has a d/<date>.json naming its hour files. One day is loaded at a
+// time, so the page never holds more than about a day (memory on the iPad).
+let DAYS = [], VIEW_DAY = null, CUR_VIEW = null;
+const FMT_DAYPICK = new Intl.DateTimeFormat('en-US', {weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC'});
+function drawDayPicker() {
+  const sel = document.getElementById('day-pick');
+  sel.innerHTML = '<option value="">Last 24 hours</option>' + [...DAYS].reverse().map(d =>
+    `<option value="${d.date}">${FMT_DAYPICK.format(new Date(d.date + 'T12:00:00Z'))}</option>`).join('');
+  sel.value = VIEW_DAY || '';
+}
+function pickDay(date) {
+  if (playing) togglePlay();
+  VIEW_DAY = date || null;
+  document.getElementById('updated').textContent = 'loading…';
+  if (VIEW_DAY) loadDay(VIEW_DAY); else loadData();
+}
+function goNow() {
+  if (playing) togglePlay();
+  if (VIEW_DAY) { document.getElementById('day-pick').value = ''; pickDay(''); }
+  else jumpTo(SPAN);
+}
+async function loadDay(date) {
+  const d = DAYS.find(x => x.date === date);
+  let idx;
+  try {
+    if (!d) throw new Error('no longer kept');
+    idx = (await fetchChecked({name: 'd/' + date + '.json', hash: d.hash})).data;
+  } catch (e) {
+    document.getElementById('updated').textContent = 'could not load that day (' + e.message + ')';
+    return;
+  }
+  if (VIEW_DAY === date) await showIndex(idx, false);
+}
+
 async function loadData() {
   let idx;
   try {
     const r = await fetch(DATA_BASE + 'live.json?t=' + Date.now());
     if (!r.ok) throw new Error('HTTP ' + r.status);
     idx = await r.json();
+  } catch (e) {
+    document.getElementById('updated').textContent = META ? 'update failed, showing ' + shortTime(SPAN) : 'no data yet (' + e.message + ')';
+    return;
+  }
+  DAYS = idx.days || [];
+  drawDayPicker();
+  if (VIEW_DAY) return;          // looking at a past day: only the list of days refreshes
+  await showIndex(idx, true);
+}
+
+async function showIndex(idx, live) {
+  try {
     await Promise.all(idx.chunks.map(async c => {
       if (chunkCache[c.name] && chunkCache[c.name].hash === c.hash) return;
       const {hash, data: body} = await fetchChecked(c);
@@ -1261,11 +1317,14 @@ async function loadData() {
     document.getElementById('updated').textContent = META ? 'update failed, showing ' + shortTime(SPAN) : 'no data yet (' + e.message + ')';
     return;
   }
+  if (live ? VIEW_DAY : VIEW_DAY !== idx.meta.date) return;   // the choice changed while loading
   const current = new Set(idx.chunks.map(c => c.name));
   Object.keys(chunkCache).forEach(n => { if (!current.has(n)) delete chunkCache[n]; });
 
-  const atEdge = !META || _curMin >= SPAN - 1;
-  const shift = META ? (META.start - idx.meta.start) / 60 : 0;
+  const view = live ? 'live' : idx.meta.date, switched = view !== CUR_VIEW;
+  CUR_VIEW = view;
+  const atEdge = switched || _curMin >= SPAN - 1;
+  const shift = META && !switched ? (META.start - idx.meta.start) / 60 : 0;
   META = idx.meta; WX = idx.wx || [];
   SPAN = META.span_min;
   // Concatenate the hour files (sorted by name = by time) into one set of
@@ -1289,16 +1348,27 @@ async function loadData() {
   });
   PTS = all;
   _curMin = atEdge ? SPAN : Math.max(0, Math.min(SPAN, _curMin + shift));
+  // a past day opens at its last recorded moment, not at an empty midnight
+  if (!live && switched && PTS.n) _curMin = Math.min(SPAN, Math.ceil(PTS.tmin[PTS.n - 1]));
   document.getElementById('timeline').max = SPAN;
   document.getElementById('tl-start').textContent = shortTime(0);
   document.getElementById('tl-end').textContent = shortTime(SPAN);
   document.getElementById('badge-pos').textContent = META.positions.toLocaleString() + ' positions';
   document.getElementById('badge-ac').textContent = META.aircraft.toLocaleString() + ' aircraft';
-  const age = (Date.now() / 1000 - META.built) / 60;
+  document.querySelectorAll('.view-lbl').forEach(el => { el.textContent = live ? 'last 24 h'
+    : FMT_DAYPICK.format(new Date(idx.meta.date + 'T12:00:00Z')); });
   const upd = document.getElementById('updated');
-  upd.textContent = 'updated ' + FMT_TIME.format(new Date(META.built * 1000)).replace(/^0/, '') +
-    (age > STALE_MIN ? ' — ' + Math.round(age / 60 * 10) / 10 + ' h ago, the Pi may be offline' : '');
-  upd.style.color = age > STALE_MIN ? '#ff9f40' : '';
+  if (live) {
+    const age = (Date.now() / 1000 - META.built) / 60;
+    upd.textContent = 'updated ' + FMT_TIME.format(new Date(META.built * 1000)).replace(/^0/, '') +
+      (age > STALE_MIN ? ' — ' + Math.round(age / 60 * 10) / 10 + ' h ago, the Pi may be offline' : '');
+    upd.style.color = age > STALE_MIN ? '#ff9f40' : '';
+  } else {
+    // a day can start late: the day the archive began, or the Pi was off
+    upd.textContent = 'showing ' + FMT_DAYPICK.format(new Date(idx.meta.date + 'T12:00:00Z')) +
+      (idx.meta.first_hour > META.start ? ', recorded from ' + FMT_TIME.format(new Date(idx.meta.first_hour * 1000)).replace(/^0/, '') : '');
+    upd.style.color = '';
+  }
   drawFarm(idx.farm);
   TRACK_LIST = idx.tracks || [];
   FARM_INFO = idx.farm || null;
@@ -1574,7 +1644,7 @@ async function openRouteCard(p) {
       (FARM_MODE ? row('Height above your ground', x.alt == null ? '—' : 'about ' + num(aglFt(x.alt, t)) + ' ft') : '') +
       whereRows(p[0], p[1]) +
       aircraftBlock(x, t, 'Aircraft') +
-      '<div class="note">The white line is its whole path in the last 24 hours.</div>';
+      '<div class="note">The white line is its whole path ' + (VIEW_DAY ? 'that day' : 'in the last 24 hours') + '.</div>';
   };
   draw();
   card.hidden = false;
@@ -1730,7 +1800,7 @@ async function runNear(ev) {
   const hmin = +document.getElementById('near-hmin').value, hmax = +document.getElementById('near-hmax').value;
   if (!FARM_CENTER || !(t1 > t0)) { status.textContent = 'Check the times: "To" must be after "From".'; return; }
   const names = TRACK_LIST.filter(c => {
-    const m = c.name.match(/(\d{4})(\d{2})(\d{2})(\d{2})/);
+    const m = c.name.match(/(\d{4})(\d{2})(\d{2})\/?(\d{2})\.json/);
     const h = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4]) / 1000;
     return h + 3600 > t0 && h <= t1;
   });
