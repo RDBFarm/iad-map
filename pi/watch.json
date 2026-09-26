@@ -1,0 +1,65 @@
+{
+ "_source": "Aircraft tagged Air Force One or Doomsday Plane in plane-alert-db (ODbL 1.0); built by tools/make_notable.py.",
+ "_fields": [
+  "name",
+  "registration",
+  "type"
+ ],
+ "aircraft": {
+  "14fc10": [
+   "Doomsday plane",
+   "RA-64528",
+   "Tupolev Tu-214SR"
+  ],
+  "156dca": [
+   "Doomsday plane",
+   "RF-93642",
+   "Ilyushin IL-86 VKP"
+  ],
+  "156dcd": [
+   "Doomsday plane",
+   "RF-93645",
+   "Ilyushin IL-86 VKP"
+  ],
+  "156dce": [
+   "Doomsday plane",
+   "RF-93646",
+   "Ilyushin IL-76VKP"
+  ],
+  "adfdf8": [
+   "Air Force One",
+   "82-8000",
+   "Boeing VC25A"
+  ],
+  "adfdf9": [
+   "Air Force One",
+   "92-9000",
+   "Boeing VC25A"
+  ],
+  "adfeb3": [
+   "Doomsday plane",
+   "73-1676",
+   "E-4B Nightwatch"
+  ],
+  "adfeb4": [
+   "Doomsday plane",
+   "73-1677",
+   "E-4B Nightwatch"
+  ],
+  "adfeb5": [
+   "Doomsday plane",
+   "74-0787",
+   "E-4B Nightwatch"
+  ],
+  "adfeb6": [
+   "Doomsday plane",
+   "75-0125",
+   "E-4B Nightwatch"
+  ],
+  "af83f3": [
+   "Air Force One",
+   "25-3300",
+   "Boeing VC-25B Bridge"
+  ]
+ }
+}
