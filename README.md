@@ -42,6 +42,8 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
   unflagged close approaches with at least one jet in them, and lists them in the Events panel. Tapping one opens a detail card; "Hide
 from the map" removes it for that browser (remembered between visits), and
 "Show N hidden" brings hidden ones back.
+The "Last 24 hours" label is a day picker: any of the last 30 finished days
+(Eastern time) opens on its own, from the Pi's `d/<date>.json` day files.
 `flights.html` is the same map without anything about the farm, built from
 `live.html` by `tools/make_public.py` (never edit it by hand).
 Tapping a dot on any route opens the same card for that aircraft. The panel

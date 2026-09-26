@@ -5,7 +5,8 @@ The map's own points stop at 15,000 ft and 50 miles from Dulles. When the
 owner selects a flight, the map instead draws its whole recorded path, at
 every altitude and range, from these files (owner's request, 2026-09-24).
 
-One file per UTC hour, t/<YYYYMMDDHH>.json:
+One file per UTC hour, t/<YYYYMMDD>/<HH>.json (a folder per UTC day, so a
+push only rewrites today's short folder listing; see publish.py):
   {"start": hour_epoch, "ac": {hex: [flight, type, [[sec, lat, lon, alt], ...]]}}
 
 To keep uploads small each track is simplified for drawing: a point is kept
@@ -16,12 +17,31 @@ in flights.db keeps every point. A finished hour's file is built once it has
 settled and then reused (publish.py keeps the list of final ones), so each
 push only carries the current hour's.
 """
-import json, os, sqlite3, time
+import json, os, re, sqlite3, time
 
 KEEP_EVERY_S = 60
 TURN_DEG = 3
 CLIMB_FT = 200
 GAP_S = 30
+
+
+def hour_name(kind, hour):
+    """'h' or 't', and the hour's start (epoch) -> its file name."""
+    g = time.gmtime(hour)
+    return f"{kind}/{time.strftime('%Y%m%d', g)}/{time.strftime('%H', g)}.json"
+
+
+_NAME = re.compile(r"^([ht])/(\d{8})/?(\d{2})\.json$")
+
+
+def parse_name(name):
+    """(kind, hour start) for an hour file name, in the folder layout or the
+    flat h/<YYYYMMDDHH>.json one used until 2026-09-26; None otherwise."""
+    m = _NAME.match(name)
+    if not m:
+        return None
+    import calendar
+    return m.group(1), calendar.timegm(time.strptime(m.group(2) + m.group(3), "%Y%m%d%H"))
 
 
 def _turn(a, b):
@@ -80,7 +100,7 @@ def build(db_path, work_dir, start, end, type_for=None, final=frozenset(), settl
     first = start - start % 3600
     db = None
     for hour in range(first, end + 1, 3600):
-        name = "t/" + time.strftime("%Y%m%d%H", time.gmtime(hour)) + ".json"
+        name = hour_name("t", hour)
         path = os.path.join(work_dir, name)
         if hour + 3600 + settle_s <= end:
             now_final.add(name)
