@@ -207,6 +207,11 @@ See `README.md` for how to install. In short:
 - **Hide viewed incidents**: per browser, in localStorage; "Show N hidden" restores.
 - The **Now** button stays at now; playback stops at the live edge.
 
+### Map changes 09-26 (his requests)
+- **Close approaches: only with a jet in them** (his words: "way too many flight instructor schools have close calls. maybe limit the close calls to jets?"). Page-side only: at least one aircraft with a J engine descriptor; "both jets" is the alternative if he wants fewer. The Pi still logs every one. On 09-26 data this removed all 5 that were showing (C172/PA31, P28A, BE20/BE9L, C172, C172).
+- **Categories on the right** (his list: private, commercial, helicopters, military, military fighters, plus "experimental too"). One per aircraft, first match wins: fighter (type list, general knowledge, T-38s included) → military (US military address block ADF7C8–AFFFFF; 99% of tar1090-db entries there are flagged military; foreign military not recognised) → helicopter (descriptor H) → experimental (kit builders matched by type name; misses kit planes whose type isn't reported) → commercial (airline-style callsign on anything but a piston plane, so flight schools flying Cessnas under a company callsign count as private) → private. A military helicopter counts as military. Airport toggles moved into a folded "Airports" section. On a phone the panel folds to a "✈ Show" button. 09-26 counts: private 586, commercial 864, helicopters 24, military 38, fighters 0, experimental 9.
+- **Tapping a dot on a route** opens the same detail card as an event (replaces the old small popup), with its whole 24 h path drawn. Registration is worked out from a US address (N-number rule; 392,062 of 392,213 agree with tar1090-db, the rest look like re-registrations); the airline name comes from `pi/operators.json`, fetched on first tap.
+
 ### Planned, not built
 - **Weather radar overlay** — historical mode via IEM WMS-T NEXRAD (round the slider's UTC time to 5 min); live mode via RainViewer current tiles. Both as transparent overlays behind the dots.
 - **Layering live tracks on the heat map** was the original idea; the live map is a separate page instead, and the historical map is frozen.
