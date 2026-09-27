@@ -44,6 +44,8 @@ from the map" removes it for that browser (remembered between visits), and
 "Show N hidden" brings hidden ones back.
 The "Last 24 hours" label is a day picker: any of the last 30 finished days
 (Eastern time) opens on its own, from the Pi's `d/<date>.json` day files.
+`heat.html` is the history heat map: every path so far, added up and weighted by
+aircraft size, built once a day on the Pi by `pi/heatmap.py`.
 `flights.html` is the same map without anything about the farm, built from
 `live.html` by `tools/make_public.py` (never edit it by hand).
 Tapping a dot on any route opens the same card for that aircraft. The panel

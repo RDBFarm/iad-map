@@ -46,6 +46,7 @@ from zoneinfo import ZoneInfo
 
 import aircraft_lookup
 import farm
+import heatmap
 import proximity
 import tracks
 
@@ -791,6 +792,45 @@ def archive(index, files, final, end):
     return final & set(files)
 
 
+def map_points_for_hour(hour):
+    """One hour of the live map's positions straight from the log, with the
+    map's own filters (departures dropped, is_arrival), for the heat map's
+    hours from before the first hour file kept. (t, hex, lat, lon, type)."""
+    logged = [r for r in load_points(hour - 600, hour + 3600) if r[4] <= MAX_ALT_FT]
+    logged.sort(key=lambda r: (r[0], r[1]))
+    departures = departure_points(logged)
+    return [(r[0], r[1], r[2], r[3], r[9]) for r in logged
+            if hour <= r[0] < hour + 3600 and (r[1], r[0]) not in departures
+            and is_arrival(r[4], r[5] or 0, r[7] or 0, r[6] or 0, r[2], r[3], r[11], r[8])]
+
+
+def log_start():
+    """When the log begins (epoch), or None."""
+    try:
+        db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=60)
+        t = db.execute("SELECT MIN(t) FROM positions").fetchone()[0]
+        db.close()
+        return int(t) if t else None
+    except sqlite3.Error:
+        return None
+
+
+def update_heat(index, final, now):
+    """The history heat map (heatmap.py): add new settled hours; write heat.png
+    and heat.json at most once a day. Never stops the map."""
+    try:
+        wrote = heatmap.update(WORK_DIR, final, tracks.parse_name, tracks.hour_name,
+                               map_points_for_hour, now,
+                               os.path.join(os.path.dirname(DB_PATH), "heat"), db_start=log_start())
+        if wrote:
+            print("publish: heat map rewritten", flush=True)
+        if os.path.exists(os.path.join(WORK_DIR, "heat.json")):
+            with open(os.path.join(WORK_DIR, "heat.json")) as f:
+                index["heat"] = {"built": json.load(f).get("built")}
+    except Exception as e:
+        print("publish: heat map failed:", e, flush=True)
+
+
 def enrich(index):
     """Give every aircraft named in an event its registration, type and the
     type's full name, for the map's detail card. Looked up at publish time,
@@ -830,6 +870,7 @@ def main():
     index["farm"]["summary"] = farm.summary(index["farm"]["passes"])
     enrich(index)
     final = archive(index, files, final | (frozen - set(files)), index["meta"]["end"])
+    update_heat(index, final, index["meta"]["end"])
     m = index["meta"]
     print(f"publish: {m['positions']} positions, {m['aircraft']} aircraft, "
           f"{m['mlat_positions']} MLAT positions, {m['aircraft_mlat_only']} aircraft seen only by MLAT, "

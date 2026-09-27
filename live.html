@@ -58,6 +58,7 @@
     background:#40b4ff; cursor:pointer; box-shadow:0 0 6px rgba(64,180,255,0.6);
   }
   #btn-row { display:flex; align-items:center; gap:10px; }
+  a.btn { text-decoration:none; display:inline-block; }
   .btn {
     background:rgba(64,180,255,0.12); border:1px solid rgba(64,180,255,0.3);
     color:#40b4ff; padding:5px 14px; border-radius:6px; font-size:0.78rem;
@@ -191,6 +192,7 @@
     #hdr .badge { display:none; }
     #hdr .sub { display:none; }
     #hdr .btn { padding:4px 8px; font-size:0.72rem; }
+    #hdr .blbl { display:none; }   /* icons only on a phone: the header has three buttons */
     #hdr h1 { font-size:0.9rem; }
     #search-panel { width:calc(100% - 175px); }
     /* the day picker is wider than the old label: keep the clock on two lines */
@@ -259,8 +261,9 @@
   </div>
   <span class="badge" id="badge-pos">— positions</span>
   <span style="margin-left:auto"></span>
-  <!--farm--><button class="btn" id="btn-near" onclick="toggleNear()">📍 Near the farm</button><!--/farm-->
-  <button class="btn" id="btn-mapstyle" onclick="toggleMapStyle()">🌙 Night Map</button>
+  <!--farm--><button class="btn" id="btn-near" onclick="toggleNear()" title="Near the farm">📍<span class="blbl"> Near the farm</span></button><!--/farm-->
+  <a class="btn" id="btn-heat" href="heat.html" title="History heat map: every path so far, added up">🔥<span class="blbl"> History</span></a>
+  <button class="btn" id="btn-mapstyle" onclick="toggleMapStyle()" title="Night / day map">🌙<span class="blbl"> Night Map</span></button>
   <span class="badge" id="badge-ac">— aircraft</span>
   <span class="badge">≤ 15,000 ft</span>
 </div>
@@ -831,7 +834,7 @@ function toggleMapStyle() {
     {attribution:TILE_ATTR, subdomains:'abcd', maxZoom:14}).addTo(map);
   // Move tile layer to bottom so dots stay on top
   tileLayer.bringToBack();
-  document.getElementById('btn-mapstyle').textContent = isDark ? '🌙 Night Map' : '☀️ Day Map';
+  document.getElementById('btn-mapstyle').innerHTML = isDark ? '🌙<span class="blbl"> Night Map</span>' : '☀️<span class="blbl"> Day Map</span>';
   // Adjust header/controls background for readability
   const bg  = isDark ? 'rgba(10,10,20,0.92)' : 'rgba(240,240,250,0.92)';
   const bg2 = isDark ? 'rgba(10,10,20,0.95)' : 'rgba(240,240,250,0.95)';
