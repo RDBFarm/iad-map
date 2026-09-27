@@ -41,6 +41,9 @@
     border-radius:5px; padding:2px 4px; font:inherit; }
   #tol { flex:1; }
   #wind-info { color:#fff; margin-top:4px; }
+  .leaflet-tooltip.ap-label { background:rgba(255,255,255,0.85); color:#111; border:none; box-shadow:none;
+    font-size:0.66rem; font-weight:600; padding:1px 4px; border-radius:3px; }
+  .leaflet-tooltip.ap-label::before { display:none; }
   @media (max-width: 640px) {
     #hdr { gap:8px; padding:8px 10px; }
     #hdr .sub { display:none; }
@@ -107,6 +110,20 @@ const map = L.map('map', {center: [38.9444, -77.4558], zoom: 9, maxZoom: 13, pre
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=cb1_2vf8_1_82e754999cedcd91f5532f97', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
   subdomains: 'abcd', maxZoom: 19}).addTo(map);
+
+// Airports, as on the live map: neutral markers labelled by code (tap for the name),
+// drawn above the heat layer.
+map.createPane('airports').style.zIndex = 650;
+[[38.9444, -77.4558, 'KIAD', 'Washington Dulles', 5], [38.8521, -77.0377, 'KDCA', 'Reagan National', 5],
+ [39.1754, -76.6683, 'KBWI', 'Baltimore/Washington', 5], [39.0779, -77.5578, 'KJYO', 'Leesburg Executive', 3],
+ [39.1683, -77.1660, 'KGAI', 'Montgomery Airpark', 3], [38.7214, -77.5153, 'KHEF', 'Manassas Regional', 3],
+ [38.5997, -77.4542, 'KRMN', 'Stafford Regional', 3], [38.8108, -76.8674, 'KADW', 'Joint Base Andrews', 3],
+ [38.5036, -77.3050, 'KNYG', 'Quantico MCAF', 3]].forEach(([lat, lon, code, name, radius]) => {
+  L.circleMarker([lat, lon], {pane: 'airports', radius, color: '#000', fillColor: '#fff', fillOpacity: 1, weight: 1.5})
+    .bindTooltip(code, {pane: 'airports', permanent: true, direction: 'right', offset: [6, 0], className: 'ap-label'})
+    .bindPopup(code + ' — ' + name)
+    .addTo(map);
+});
 
 const VIRIDIS = [[68,1,84],[72,40,120],[62,74,137],[49,104,142],[38,130,142],[31,158,137],[53,183,121],[109,205,89],[180,222,44],[253,231,37]];
 function viridis(t) {
