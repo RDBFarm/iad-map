@@ -16,26 +16,37 @@
   #hdr h1 { font-size:1.05rem; color:#fff; white-space:nowrap; }
   #hdr .sub { font-size:0.7rem; color:#8899bb; margin-top:2px; }
   .btn { background:rgba(255,255,255,0.08); color:#dde; border:1px solid rgba(255,255,255,0.18); border-radius:6px;
-    padding:5px 10px; font-size:0.78rem; cursor:pointer; text-decoration:none; white-space:nowrap; }
+    padding:5px 10px; font-size:0.78rem; cursor:pointer; text-decoration:none; white-space:nowrap; font-family:inherit; }
+  .btn.on { background:rgba(253,231,37,0.18); border-color:rgba(253,231,37,0.6); color:#fff; }
   #map { position:absolute; top:52px; left:0; right:0; bottom:0; background:#0a0a14; }
   .panel { position:absolute; z-index:1000; background:rgba(10,10,20,0.9); border:1px solid rgba(255,255,255,0.1);
     border-radius:10px; padding:10px 14px; font-size:0.72rem; color:#ccd; line-height:1.5; }
+  .panel h3 { font-size:0.78rem; color:#fff; margin-bottom:6px; cursor:pointer; }
+  .panel h3::after { content:" ▾"; color:#889; }
+  .panel.folded h3::after { content:" ▸"; }
+  .panel.folded .fold { display:none; }
+  .panel h3 { margin-bottom:4px; }
   #legend { right:14px; bottom:26px; width:min(300px, calc(100% - 28px)); }
-  #legend h3 { font-size:0.78rem; color:#fff; margin-bottom:6px; cursor:pointer; }
-  #legend h3::after { content:" ▾"; color:#889; }
-  #legend.folded h3::after { content:" ▸"; }
-  #legend.folded .fold { display:none; }
   #ramp { height:12px; border-radius:3px; margin:4px 0 2px; }
   #ramp-lbl { display:flex; justify-content:space-between; color:#99a; font-size:0.66rem; }
-  #legend .note { color:#8899bb; margin-top:6px; }
+  .panel .note { color:#8899bb; margin-top:6px; }
   #legend input[type=range] { width:100%; }
-  #status { left:14px; bottom:26px; max-width:calc(100% - 340px); color:#aab; }
+  #status { color:#aab; }
+  #wind { right:14px; top:64px; width:196px; }
+  #dial { display:block; margin:4px auto 2px; touch-action:none; cursor:grab; }
+  #wind-row { display:flex; gap:6px; margin:6px 0 4px; }
+  #wind-row .btn { flex:1; padding:4px 0; text-align:center; }
+  #wind label { display:flex; align-items:center; gap:6px; margin-top:4px; color:#aab; }
+  #deg { width:4.2em; background:rgba(255,255,255,0.08); color:#fff; border:1px solid rgba(255,255,255,0.25);
+    border-radius:5px; padding:2px 4px; font:inherit; }
+  #tol { flex:1; }
+  #wind-info { color:#fff; margin-top:4px; }
   @media (max-width: 640px) {
     #hdr { gap:8px; padding:8px 10px; }
     #hdr .sub { display:none; }
     #hdr h1 { font-size:0.9rem; }
     .btn { padding:4px 8px; font-size:0.72rem; }
-    #status { bottom:auto; top:62px; left:54px; max-width:calc(100% - 68px); font-size:0.66rem; padding:6px 10px; }
+    #wind { width:176px; top:60px; right:10px; }
   }
 </style>
 </head>
@@ -49,6 +60,21 @@
   <a class="btn" id="back" href="live.html">✈ Live map</a>
 </div>
 <div id="map"></div>
+
+<div class="panel" id="wind">
+  <h3 onclick="document.getElementById('wind').classList.toggle('folded')">🧭 Wind at Dulles</h3>
+  <div class="fold">
+    <svg id="dial" width="140" height="140" viewBox="-70 -70 140 140" aria-label="Wind direction dial"></svg>
+    <div id="wind-row">
+      <button class="btn on" id="w-all">All winds</button>
+      <button class="btn" id="w-calm">Calm</button>
+    </div>
+    <label>From <input id="deg" type="number" min="0" max="359" step="10" value="" placeholder="—" inputmode="numeric" aria-label="Wind from, degrees"> °</label>
+    <label>± <input id="tol" type="range" min="0" max="180" step="10" value="30" aria-label="Range either side"> <span id="tol-v">30°</span></label>
+  </div>
+  <div id="wind-info">All winds</div>
+</div>
+
 <div class="panel" id="legend">
   <h3 onclick="document.getElementById('legend').classList.toggle('folded')">Traffic, weighted by size</h3>
   <div id="ramp"></div>
@@ -56,17 +82,21 @@
   <div class="note fold">A small plane counts 1, an airliner or business jet 10: 100 private planes glow like 10 airliners.
     Each aircraft counts once per cell it crosses (cells ~110 m), so busy routes get brighter, not wider.
     Log scale. Same traffic as the live map: within 50 mi of Dulles, below 15,000 ft, take-offs left out.</div>
+  <div class="note fold">Wind: KIAD's report nearest the middle of each hour, the direction it blows <b>from</b>
+    (as weather reports give it), to 10°. Calm includes variable.</div>
   <div class="note fold">Contrast <input type="range" id="gamma" min="30" max="200" value="100" aria-label="Contrast"></div>
+  <div class="note" id="status">Loading the heat map…</div>
 </div>
-<div class="panel" id="status">Loading the heat map…</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-// The history heat map, built on the Pi by pi/heatmap.py (see its docstring)
-// and published once a day as heat.png (8-bit, log-scaled weight per cell)
-// with heat.json (bounds, the largest weight, hours covered). Colours: viridis,
-// as on the live map (colourblind-friendly), dim purple for little traffic
-// to bright yellow for the most; empty cells are transparent.
+// The history heat map, built on the Pi by pi/heatmap.py (see its docstring):
+// heat.png (all winds) and heat/<dir>.png, heat/calm.png (by KIAD's wind at
+// the time), 8-bit log-scaled weight per cell, with heat.json (bounds, each
+// image's largest weight, hours). A wind range adds up the images inside it
+// (back to weights, summed, re-scaled). Colours: viridis, as on the live map
+// (colourblind-friendly): dim purple for little traffic to bright yellow for
+// the most; empty cells are transparent.
 // back to whichever live page linked here (flights.html is the one without the farm)
 if (/flights\.html/.test(document.referrer)) document.getElementById('back').href = 'flights.html';
 const DATA_BASE = (new URLSearchParams(location.search).get('data') ||
@@ -84,36 +114,158 @@ function viridis(t) {
 document.getElementById('ramp').style.background =
   'linear-gradient(to right,' + Array.from({length: 11}, (_, i) => `rgb(${viridis(i / 10).join(',')})`).join(',') + ')';
 
-let GREY = null, META = null, overlay = null;
+let META = null, overlay = null;
+const IMG = {};             // image key ('all', '000'..'350', 'calm') -> Uint8Array of cells
+let SHOWN = null;           // {q: Uint8Array, max: weight} currently drawn
 const FMT = new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric'});
+
+async function loadImage(key) {
+  if (IMG[key]) return IMG[key];
+  const url = key === 'all' ? 'heat.png?b=' + META.built : 'heat/' + key + '.png?v=' + META.wind[key].v;
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.src = DATA_BASE + url;
+  await img.decode();
+  const cv = document.createElement('canvas');
+  cv.width = META.cols; cv.height = META.rows;
+  const ctx = cv.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  const rgba = ctx.getImageData(0, 0, META.cols, META.rows).data, q = new Uint8Array(META.cols * META.rows);
+  for (let i = 0; i < q.length; i++) q[i] = rgba[i * 4];
+  return (IMG[key] = q);
+}
+
 function paint() {
-  if (!GREY) return;
+  if (!SHOWN) return;
   const g = +document.getElementById('gamma').value / 100;
-  const {rows, cols} = META;
+  const {rows, cols} = META, q = SHOWN.q;
   const cv = document.createElement('canvas');
   cv.width = cols; cv.height = rows;
   const ctx = cv.getContext('2d'), img = ctx.createImageData(cols, rows), out = img.data;
   const lut = new Uint8ClampedArray(256 * 4);
-  for (let q = 1; q < 256; q++) {
-    const t = Math.pow(q / 255, g), [r, gg, b] = viridis(t);
-    lut.set([r, gg, b, Math.round(90 + 165 * Math.min(1, t * 1.4))], q * 4);
+  for (let v = 1; v < 256; v++) {
+    const t = Math.pow(v / 255, g), [r, gg, b] = viridis(t);
+    lut.set([r, gg, b, Math.round(90 + 165 * Math.min(1, t * 1.4))], v * 4);
   }
-  for (let i = 0, n = rows * cols; i < n; i++) {
-    const q = GREY[i * 4];
-    if (q) out.set(lut.subarray(q * 4, q * 4 + 4), i * 4);
-  }
+  for (let i = 0, n = rows * cols; i < n; i++) if (q[i]) out.set(lut.subarray(q[i] * 4, q[i] * 4 + 4), i * 4);
   ctx.putImageData(img, 0, 0);
   const url = cv.toDataURL();
   if (overlay) overlay.setUrl(url);
   else overlay = L.imageOverlay(url, META.bounds, {opacity: 1, interactive: false}).addTo(map);
-  // weight at the middle of the ramp: back through the log scale and the contrast
-  const w = t => Math.expm1(Math.pow(t, 1 / g) * Math.log1p(META.max_weight));
-  document.getElementById('lbl-mid').textContent = '≈' + Math.round(w(0.5)).toLocaleString();
-  document.getElementById('lbl-hi').textContent = Math.round(META.max_weight).toLocaleString();
+  const w = t => Math.expm1(Math.pow(t, 1 / g) * Math.log1p(SHOWN.max));
+  document.getElementById('lbl-mid').textContent = SHOWN.max ? '≈' + Math.round(w(0.5)).toLocaleString() : '';
+  document.getElementById('lbl-hi').textContent = SHOWN.max ? Math.round(SHOWN.max).toLocaleString() : '—';
 }
 document.getElementById('gamma').addEventListener('input', paint);
-// on a phone the explanation starts folded; tap the title to open it
-if (window.innerWidth <= 640) document.getElementById('legend').classList.add('folded');
+
+// ── Wind selection ─────────────────────────────────────────────────────────
+let MODE = 'all', DIR = null;
+const angDiff = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+function selectedKeys() {
+  if (MODE === 'all') return ['all'];
+  if (MODE === 'calm') return META.wind.calm ? ['calm'] : [];
+  const tol = +document.getElementById('tol').value;
+  return Object.keys(META.wind).filter(k => k !== 'calm' && angDiff(+k, DIR) <= tol);
+}
+let showRequest = 0;
+async function show() {
+  const req = ++showRequest, keys = selectedKeys(), info = document.getElementById('wind-info');
+  const tol = +document.getElementById('tol').value;
+  const hours = keys.reduce((s, k) => s + (k === 'all' ? META.hours : META.wind[k].hours), 0);
+  const what = MODE === 'all' ? 'All winds' : MODE === 'calm' ? 'Calm or variable'
+    : `From ${String(DIR).padStart(3, '0')}° ± ${tol}° (${String((DIR - tol + 360) % 360).padStart(3, '0')}–${String((DIR + tol) % 360).padStart(3, '0')}°)`;
+  info.textContent = what + ' · ' + hours.toLocaleString() + ' hour' + (hours === 1 ? '' : 's');
+  drawDial();
+  if (!keys.length) { SHOWN = {q: new Uint8Array(META.rows * META.cols), max: 0}; paint(); return; }
+  info.textContent += ' · loading…';
+  let imgs;
+  try { imgs = await Promise.all(keys.map(loadImage)); } catch (e) { info.textContent = what + ' · could not load (' + e.message + ')'; return; }
+  if (req !== showRequest) return;
+  if (keys.length === 1) {
+    SHOWN = {q: imgs[0], max: keys[0] === 'all' ? META.max_weight : META.wind[keys[0]].max_weight};
+  } else {
+    // back to weights, add up, back to the same log scale for the sum
+    const n = META.rows * META.cols, sum = new Float32Array(n);
+    keys.forEach((k, j) => {
+      const lw = Math.log1p(META.wind[k].max_weight) / 255, q = imgs[j];
+      const lut = new Float32Array(256); for (let v = 1; v < 256; v++) lut[v] = Math.expm1(v * lw);
+      for (let i = 0; i < n; i++) if (q[i]) sum[i] += lut[q[i]];
+    });
+    let max = 0; for (let i = 0; i < n; i++) if (sum[i] > max) max = sum[i];
+    const q = new Uint8Array(n), s = max > 0 ? 255 / Math.log1p(max) : 0;
+    for (let i = 0; i < n; i++) if (sum[i] > 0) q[i] = Math.max(1, Math.min(255, Math.round(Math.log1p(sum[i]) * s)));
+    SHOWN = {q, max};
+  }
+  info.textContent = what + ' · ' + hours.toLocaleString() + ' hour' + (hours === 1 ? '' : 's');
+  paint();
+}
+
+// The dial: ticks around the rim show how many hours each direction has;
+// the pointer shows where the wind comes from, like a weather vane's tail.
+const svg = document.getElementById('dial'), NS = 'http://www.w3.org/2000/svg';
+function el(name, attrs, text) {
+  const e = document.createElementNS(NS, name);
+  Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+  if (text) e.textContent = text;
+  return svg.appendChild(e);
+}
+function drawDial() {
+  svg.innerHTML = '';
+  el('circle', {r: 52, fill: 'rgba(255,255,255,0.04)', stroke: 'rgba(255,255,255,0.25)'});
+  [['N', 0], ['E', 90], ['S', 180], ['W', 270]].forEach(([t, a]) => {
+    const r = a * Math.PI / 180;
+    el('text', {x: 62 * Math.sin(r), y: -62 * Math.cos(r) + 4, fill: '#99a', 'font-size': 10, 'text-anchor': 'middle'}, t);
+  });
+  const most = Math.max(1, ...Object.entries(META ? META.wind : {}).filter(([k]) => k !== 'calm').map(([, b]) => b.hours));
+  for (let d = 0; d < 360; d += 10) {
+    const b = META && META.wind[String(d).padStart(3, '0')], len = b ? 4 + 14 * b.hours / most : 2;
+    const r = d * Math.PI / 180, sel = MODE === 'dir' && angDiff(d, DIR) <= +document.getElementById('tol').value;
+    el('line', {x1: 52 * Math.sin(r), y1: -52 * Math.cos(r), x2: (52 - len) * Math.sin(r), y2: -(52 - len) * Math.cos(r),
+      stroke: sel ? 'rgb(253,231,37)' : b ? 'rgba(180,200,255,0.7)' : 'rgba(255,255,255,0.15)', 'stroke-width': 3, 'stroke-linecap': 'round'});
+  }
+  if (MODE === 'dir') {
+    const r = DIR * Math.PI / 180;
+    el('line', {x1: 0, y1: 0, x2: 50 * Math.sin(r), y2: -50 * Math.cos(r), stroke: '#fff', 'stroke-width': 2});
+    el('circle', {cx: 50 * Math.sin(r), cy: -50 * Math.cos(r), r: 6, fill: 'rgb(253,231,37)', stroke: '#000'});
+  }
+  el('text', {x: 0, y: 4, fill: '#ccd', 'font-size': 11, 'text-anchor': 'middle'},
+    MODE === 'dir' ? String(DIR).padStart(3, '0') + '°' : MODE === 'calm' ? 'calm' : 'all');
+}
+function setMode(mode, dir) {
+  MODE = mode;
+  if (dir != null) DIR = ((Math.round(dir / 10) * 10) % 360 + 360) % 360;
+  document.getElementById('w-all').classList.toggle('on', MODE === 'all');
+  document.getElementById('w-calm').classList.toggle('on', MODE === 'calm');
+  document.getElementById('deg').value = MODE === 'dir' ? DIR : '';
+  show();
+}
+let dragging = false, dragTimer = null;
+function dirFromPointer(e) {
+  const r = svg.getBoundingClientRect();
+  const x = e.clientX - (r.left + r.width / 2), y = e.clientY - (r.top + r.height / 2);
+  return (Math.atan2(x, -y) * 180 / Math.PI + 360) % 360;
+}
+svg.addEventListener('pointerdown', e => { dragging = true; svg.setPointerCapture(e.pointerId); setMode('dir', dirFromPointer(e)); });
+svg.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const d = ((Math.round(dirFromPointer(e) / 10) * 10) % 360);
+  if (d === DIR) return;
+  DIR = d; document.getElementById('deg').value = DIR; drawDial();
+  clearTimeout(dragTimer); dragTimer = setTimeout(show, 120);   // redraw the map once the pointer pauses
+});
+svg.addEventListener('pointerup', () => { dragging = false; show(); });
+document.getElementById('w-all').onclick = () => setMode('all');
+document.getElementById('w-calm').onclick = () => setMode('calm');
+document.getElementById('deg').addEventListener('change', e => {
+  const v = parseFloat(e.target.value);
+  if (Number.isFinite(v)) setMode('dir', v); else setMode('all');
+});
+document.getElementById('tol').addEventListener('input', e => {
+  document.getElementById('tol-v').textContent = e.target.value + '°';
+  if (MODE === 'dir') { drawDial(); clearTimeout(dragTimer); dragTimer = setTimeout(show, 150); }
+});
+// on a phone both panels start folded; tap a title to open it
+if (window.innerWidth <= 640) ['legend', 'wind'].forEach(id => document.getElementById(id).classList.add('folded'));
 
 async function load() {
   const status = document.getElementById('status');
@@ -121,25 +273,19 @@ async function load() {
     const r = await fetch(DATA_BASE + 'heat.json?t=' + Date.now());
     if (!r.ok) throw new Error(r.status === 404 ? 'not built yet: the Pi writes it once a day' : 'HTTP ' + r.status);
     META = await r.json();
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = DATA_BASE + 'heat.png?b=' + META.built;
-    await img.decode();
-    const cv = document.createElement('canvas');
-    cv.width = META.cols; cv.height = META.rows;
-    const ctx = cv.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    GREY = ctx.getImageData(0, 0, META.cols, META.rows).data;
-    paint();
+    META.wind = META.wind || {};
     const from = META.first_hour ? FMT.format(new Date(META.first_hour * 1000)) : '?';
     const to = META.last_hour ? FMT.format(new Date((META.last_hour + 3600) * 1000)) : '?';
     document.getElementById('covered').textContent = from + ' – ' + to + ' · ' + META.hours.toLocaleString() + ' hours';
     status.textContent = META.aircraft_hours.toLocaleString() + ' aircraft-hours, ' + from + ' – ' + to +
-      '. Rebuilt once a day, last ' + FMT.format(new Date(META.built * 1000)) + '.';
+      '. Rebuilt once a day, last ' + FMT.format(new Date(META.built * 1000)) + '.' +
+      (META.no_wind_hours ? ' ' + META.no_wind_hours + ' hours had no wind report and are in "All winds" only.' : '');
+    await show();
   } catch (e) {
     status.textContent = 'No heat map yet (' + e.message + ').';
   }
 }
+drawDial();
 load();
 </script>
 </body>
