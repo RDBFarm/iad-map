@@ -318,13 +318,16 @@ const AIRPORTS = [[0, 'KIAD', 'Dulles'], [1, 'KDCA', 'Reagan Natl'], [2, 'KBWI',
 const activeAP = new Set(AIRPORTS.map(a => a[0]));
 function selectedKeys() {
   const winds = selectedWindKeys(), movs = V2 && document.getElementById('takeoffs').checked ? ['a', 'd'] : ['a'];
-  const scopes = activeAP.size === AIRPORTS.length ? ['all'] : [...activeAP];
+  // older heat maps have no airport split: then the full map shows whatever is selected
+  const scopes = activeAP.size === AIRPORTS.length || !airportsAvailable() ? ['all'] : [...activeAP];
   const out = [];
   scopes.forEach(sc => winds.forEach(w => movs.forEach(m => { const k = sc + '/' + w + '/' + m; if (imgInfo(k)) out.push(k); })));
   return out;
 }
+const airportsAvailable = () => !META || V2 || !!META.airports;
 function drawAirports() {
   const list = document.getElementById('ap-list');
+  list.style.opacity = airportsAvailable() ? '' : '0.4';
   list.innerHTML = '';
   AIRPORTS.forEach(([id, code, name]) => {
     const row = document.createElement('div');
@@ -334,7 +337,9 @@ function drawAirports() {
     list.appendChild(row);
   });
   const n = activeAP.size;
-  document.getElementById('ap-info').textContent = n === AIRPORTS.length ? 'All airports'
+  document.getElementById('ap-info').textContent = !airportsAvailable()
+    ? 'Airport choices work once the Pi finishes rebuilding the heat map; showing all airports until then.'
+    : n === AIRPORTS.length ? 'All airports'
     : n === 0 ? 'No airports' : n > 3 ? n + ' of ' + AIRPORTS.length + ' airports'
     : AIRPORTS.filter(a => activeAP.has(a[0])).map(a => a[1]).join(', ');
 }
