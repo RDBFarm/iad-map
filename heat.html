@@ -27,8 +27,19 @@
   .panel.folded .fold { display:none; }
   .panel h3 { margin-bottom:4px; }
   #legend { right:14px; bottom:26px; width:min(300px, calc(100% - 28px)); }
-  #ramp { height:12px; border-radius:3px; margin:4px 0 2px; }
-  #ramp-lbl { display:flex; justify-content:space-between; color:#99a; font-size:0.66rem; }
+  .ramp { height:10px; border-radius:3px; margin:3px 0 1px; }
+  .ramp-lbl { display:flex; justify-content:space-between; color:#99a; font-size:0.66rem; }
+  .ramp-name { color:#dde; margin-top:4px; }
+  #colour-row { display:flex; gap:6px; margin:4px 0 6px; }
+  #colour-row .btn { flex:1; padding:3px 0; text-align:center; }
+  .switch { display:flex; align-items:center; gap:8px; margin:6px 0 2px; cursor:pointer; user-select:none; -webkit-user-select:none; color:#dde; }
+  .switch input { position:absolute; opacity:0; width:0; height:0; }
+  .switch .track { width:34px; height:18px; border-radius:9px; background:rgba(255,255,255,0.2); position:relative; transition:background 0.15s; flex-shrink:0; }
+  .switch .track::after { content:""; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:#fff; transition:left 0.15s; }
+  .switch input:checked + .track { background:#56B4E9; }
+  .switch input:checked + .track::after { left:18px; }
+  .switch input:focus-visible + .track { outline:2px solid #fff; outline-offset:2px; }
+  #rebuild { color:#E69F00; }
   .panel .note { color:#8899bb; margin-top:6px; }
   #legend input[type=range] { width:100%; }
   #status { color:#aab; }
@@ -75,7 +86,7 @@
 <div id="hdr">
   <div>
     <h1>🔥 IAD Flight History</h1>
-    <div class="sub">Every path the live map has shown, added up · <span id="covered">loading…</span></div>
+    <div class="sub">Every path near Dulles, added up · <span id="covered">loading…</span></div>
   </div>
   <span style="margin-left:auto"></span>
   <button class="btn" id="btn-about" onclick="document.getElementById('about').hidden = false" title="How this map is made">ⓘ<span class="blbl"> How it works</span></button>
@@ -110,9 +121,9 @@
   <div class="about-box" role="dialog" aria-label="How this map is made">
     <button class="about-close" aria-label="Close" onclick="document.getElementById('about').hidden = true">✕</button>
     <h2>How this map is made</h2>
-    <p><b>Every path the live map has shown, added up.</b> Same traffic as the live map: within 50 miles of Dulles,
-      below 15,000 ft, take-offs left out. It starts when the farm's receiver started logging and keeps growing;
-      the Pi rebuilds it once a day.</p>
+    <p><b>Every path near Dulles, added up.</b> Within 50 miles of Dulles and below 15,000 ft. With take-offs off,
+      it is exactly the live map's traffic; <b>Include take-offs</b> adds the climbs the live map leaves out. It starts
+      when the farm's receiver started logging and keeps growing; the Pi rebuilds it once a day.</p>
     <p><b>Brighter, not broader.</b> The map is a grid of cells about 110 m (360 ft) square. Each aircraft lights
       every cell its path crosses, once per pass (per hour), however slowly it flies or however many positions it
       sends. A route flown a thousand times is as thin as one flown once, just brighter.</p>
@@ -120,9 +131,11 @@
       100 private planes glow like 10 airliners. Size comes from each type's official wake-turbulence class:
       light (up to about 7 tonnes: private planes, most helicopters) = 1; medium and heavy = 10. An aircraft of
       unknown type counts 1.</p>
-    <p><b>Colours.</b> Dim purple for a little traffic to bright yellow for the most, on a log scale so quiet routes
-      still show next to the busiest ones. The numbers under the colour bar are those weights. Contrast brings out
-      faint routes.</p>
+    <p><b>Colours.</b> <b>By size:</b> small planes in orange, airliners and jets in blue, each brighter with more
+      traffic; where both fly the colours add up towards white. Orange and blue are chosen to stay distinct for most
+      kinds of colourblindness. <b>Single colour:</b> everything together, dim purple to bright yellow. Both on a log
+      scale so quiet routes still show next to the busiest; the numbers under the colour bars are the weights.
+      Contrast brings out faint routes.</p>
     <p><b>Wind.</b> Each hour is filed under Dulles's wind at the time: the report nearest the middle of the hour,
       the direction the wind blows <b>from</b> (as weather reports give it), to 10°. Calm includes variable winds.
       The ticks around the dial show how many hours each direction has.</p>
@@ -131,9 +144,13 @@
 
 <div class="panel" id="legend">
   <h3 onclick="document.getElementById('legend').classList.toggle('folded')">Traffic, weighted by size</h3>
-  <div id="ramp"></div>
-  <div id="ramp-lbl"><span id="lbl-lo">1</span><span id="lbl-mid"></span><span id="lbl-hi">—</span></div>
-  <div class="note fold">Contrast <input type="range" id="gamma" min="30" max="200" value="100" aria-label="Contrast"></div>
+  <div id="ramps"></div>
+  <label class="switch"><input type="checkbox" id="takeoffs"><span class="track"></span>Include take-offs</label>
+  <div class="fold">
+    <div id="colour-row"><button class="btn on" id="c-size">Colour by size</button><button class="btn" id="c-single">Single colour</button></div>
+    <div class="note">Contrast <input type="range" id="gamma" min="30" max="200" value="100" aria-label="Contrast"></div>
+  </div>
+  <div class="note" id="rebuild" hidden></div>
   <div class="note" id="status">Loading the heat map…</div>
 </div>
 
@@ -176,66 +193,116 @@ function viridis(t) {
   const x = Math.max(0, Math.min(1, t)) * (VIRIDIS.length - 1), i = Math.min(VIRIDIS.length - 2, Math.floor(x)), f = x - i;
   return VIRIDIS[i].map((c, k) => Math.round(c + (VIRIDIS[i + 1][k] - c) * f));
 }
-document.getElementById('ramp').style.background =
-  'linear-gradient(to right,' + Array.from({length: 11}, (_, i) => `rgb(${viridis(i / 10).join(',')})`).join(',') + ')';
+// Okabe-Ito orange and sky blue: distinct for most kinds of colourblindness
+const ORANGE = [230, 159, 0], BLUE = [86, 180, 233];
+const gradient = f => 'linear-gradient(to right,' + Array.from({length: 11}, (_, i) => `rgb(${f(i / 10).join(',')})`).join(',') + ')';
 
-let META = null, overlay = null;
-const IMG = {};             // image key ('all', '000'..'350', 'calm') -> Uint8Array of cells
-let SHOWN = null;           // {q: Uint8Array, max: weight} currently drawn
+let META = null, V2 = false, overlay = null, COLOUR = 'size';
+const IMG = {};             // image key -> {s, b} (Uint8Array per size; b null for older single images)
+const IMG_ORDER = [], IMG_KEEP = 16;   // decoded images kept (iPad memory)
+let SHOWN = null;           // {s: Float32Array, b: Float32Array, max} currently drawn
 const FMT = new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric'});
 
-// Image keys: 'all' (heat.png), a wind key ('000'..'350', 'calm': heat/<key>.png),
-// or 'ap/<zone>/<all|wind>' (heat/ap/<zone>/<key>.png).
+// Image keys are '<scope>/<wind>/<a|d>': scope 'all' or an airport zone, wind 'all' or a wind key.
+// heat.json version 2 (pi/heatmap.py): heat/v2/<key>.png, red = small aircraft, green = big.
+// While the Pi rebuilds, the older single-colour images are used (arrivals only).
 function imgInfo(key) {
-  if (key === 'all') return {url: 'heat.png?b=' + META.built, max: META.max_weight};
-  if (key.startsWith('ap/')) { const b = META.airports[key.slice(3)]; return {url: 'heat/' + key + '.png?v=' + b.v, max: b.max_weight}; }
-  return {url: 'heat/' + key + '.png?v=' + META.wind[key].v, max: META.wind[key].max_weight};
+  const [scope, wind, mov] = key.split('/');
+  if (V2) {
+    const b = META.images[key];
+    return b && {url: 'heat/v2/' + key + '.png?v=' + b.v, max: b.max, rgb: true};
+  }
+  if (mov !== 'a') return null;
+  if (scope === 'all' && wind === 'all') return {url: 'heat.png?b=' + META.built, max: [META.max_weight, 0]};
+  if (scope === 'all') { const b = META.wind[wind]; return b && {url: 'heat/' + wind + '.png?v=' + b.v, max: [b.max_weight, 0]}; }
+  const b = META.airports && META.airports[scope + '/' + wind];
+  return b && {url: 'heat/ap/' + scope + '/' + wind + '.png?v=' + b.v, max: [b.max_weight, 0]};
 }
-const IMG_ORDER = [];       // most recently used last; at most IMG_KEEP decoded images kept (iPad memory)
-const IMG_KEEP = 24;
 async function loadImage(key) {
   if (IMG[key]) { IMG_ORDER.splice(IMG_ORDER.indexOf(key), 1); IMG_ORDER.push(key); return IMG[key]; }
-  const url = imgInfo(key).url;
+  const info = imgInfo(key);
   const img = new Image();
   img.crossOrigin = 'anonymous';
-  img.src = DATA_BASE + url;
+  img.src = DATA_BASE + info.url;
   await img.decode();
   const cv = document.createElement('canvas');
   cv.width = META.cols; cv.height = META.rows;
   const ctx = cv.getContext('2d');
   ctx.drawImage(img, 0, 0);
-  const rgba = ctx.getImageData(0, 0, META.cols, META.rows).data, q = new Uint8Array(META.cols * META.rows);
-  for (let i = 0; i < q.length; i++) q[i] = rgba[i * 4];
+  const rgba = ctx.getImageData(0, 0, META.cols, META.rows).data, n = META.cols * META.rows;
+  const sm = new Uint8Array(n), bg = info.rgb ? new Uint8Array(n) : null;
+  for (let i = 0; i < n; i++) { sm[i] = rgba[i * 4]; if (bg) bg[i] = rgba[i * 4 + 1]; }
   IMG_ORDER.push(key);
   while (IMG_ORDER.length > IMG_KEEP) delete IMG[IMG_ORDER.shift()];
-  return (IMG[key] = q);
+  return (IMG[key] = {s: sm, b: bg});
 }
 
 function paint() {
   if (!SHOWN) return;
   const g = +document.getElementById('gamma').value / 100;
-  const {rows, cols} = META, q = SHOWN.q;
+  const {rows, cols} = META, n = rows * cols, S = SHOWN.s, B = SHOWN.b;
   const cv = document.createElement('canvas');
   cv.width = cols; cv.height = rows;
   const ctx = cv.getContext('2d'), img = ctx.createImageData(cols, rows), out = img.data;
-  const lut = new Uint8ClampedArray(256 * 4);
-  for (let v = 1; v < 256; v++) {
-    const t = Math.pow(v / 255, g), [r, gg, b] = viridis(t);
-    lut.set([r, gg, b, Math.round(90 + 165 * Math.min(1, t * 1.4))], v * 4);
+  const top = COLOUR === 'size' ? Math.max(SHOWN.maxS, SHOWN.maxB) : SHOWN.max;
+  const L = top > 0 ? 1 / Math.log1p(top) : 0;
+  const tOf = w => Math.pow(Math.log1p(w) * L, g);
+  if (COLOUR === 'size') {
+    // one scale for both sizes (the weights make 100 small = 10 big); colours add, towards white where both fly
+    for (let i = 0; i < n; i++) {
+      const ws = S[i], wb = B[i];
+      if (!ws && !wb) continue;
+      const ts = ws ? tOf(ws) : 0, tb = wb ? tOf(wb) : 0, j = i * 4;
+      out[j] = Math.min(255, ORANGE[0] * ts + BLUE[0] * tb);
+      out[j + 1] = Math.min(255, ORANGE[1] * ts + BLUE[1] * tb);
+      out[j + 2] = Math.min(255, ORANGE[2] * ts + BLUE[2] * tb);
+      out[j + 3] = Math.round(90 + 165 * Math.min(1, Math.max(ts, tb) * 1.4));
+    }
+  } else {
+    const lut = new Uint8ClampedArray(256 * 4);
+    for (let v = 1; v < 256; v++) {
+      const t = v / 255, [r, gg, b] = viridis(t);
+      lut.set([r, gg, b, Math.round(90 + 165 * Math.min(1, t * 1.4))], v * 4);
+    }
+    for (let i = 0; i < n; i++) {
+      const w = S[i] + B[i];
+      if (w > 0) { const q = Math.max(1, Math.min(255, Math.round(tOf(w) * 255))); out.set(lut.subarray(q * 4, q * 4 + 4), i * 4); }
+    }
   }
-  for (let i = 0, n = rows * cols; i < n; i++) if (q[i]) out.set(lut.subarray(q[i] * 4, q[i] * 4 + 4), i * 4);
   ctx.putImageData(img, 0, 0);
   const url = cv.toDataURL();
   if (overlay) overlay.setUrl(url);
-  else overlay = L.imageOverlay(url, META.bounds, {opacity: 1, interactive: false}).addTo(map);
-  const w = t => Math.expm1(Math.pow(t, 1 / g) * Math.log1p(SHOWN.max));
-  document.getElementById('lbl-mid').textContent = SHOWN.max ? '≈' + Math.round(w(0.5)).toLocaleString() : '';
-  document.getElementById('lbl-hi').textContent = SHOWN.max ? Math.round(SHOWN.max).toLocaleString() : '—';
+  else overlay = L_image(url);
+  drawRamps(g);
+}
+const L_image = url => L.imageOverlay(url, META.bounds, {opacity: 1, interactive: false}).addTo(map);
+function drawRamps(g) {
+  const fmt = v => Math.round(v).toLocaleString();
+  const mid = top => top ? '≈' + fmt(Math.expm1(Math.pow(0.5, 1 / g) * Math.log1p(top))) : '';
+  const ramp = (name, f, top) => `<div class="ramp-name">${name}</div><div class="ramp" style="background:${gradient(f)}"></div>
+    <div class="ramp-lbl"><span>1</span><span>${mid(top)}</span><span>${top ? fmt(top) : '—'}</span></div>`;
+  const el = document.getElementById('ramps');
+  if (COLOUR === 'size' && V2) {
+    const top = Math.max(SHOWN.maxS, SHOWN.maxB);
+    el.innerHTML = ramp('Small planes', t => ORANGE.map(c => Math.round(c * t)), top) +
+                   ramp('Airliners and jets', t => BLUE.map(c => Math.round(c * t)), top);
+  } else {
+    el.innerHTML = ramp('All traffic', viridis, SHOWN.max);
+  }
 }
 document.getElementById('gamma').addEventListener('input', paint);
+document.getElementById('c-size').onclick = () => setColour('size');
+document.getElementById('c-single').onclick = () => setColour('single');
+function setColour(c) {
+  COLOUR = V2 ? c : 'single';
+  document.getElementById('c-size').classList.toggle('on', COLOUR === 'size');
+  document.getElementById('c-single').classList.toggle('on', COLOUR === 'single');
+  paint();
+}
+document.getElementById('takeoffs').addEventListener('change', () => show());
 document.addEventListener('keydown', e => { if (e.key === 'Escape') document.getElementById('about').hidden = true; });
 
-// ── Wind selection ─────────────────────────────────────────────────────────
+// ── Wind and airport selection ─────────────────────────────────────────────
 let MODE = 'all', DIR = null;
 const angDiff = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
 function selectedWindKeys() {
@@ -250,10 +317,10 @@ const AIRPORTS = [[0, 'KIAD', 'Dulles'], [1, 'KDCA', 'Reagan Natl'], [2, 'KBWI',
   [9, 'KNYG', 'Quantico MCAF'], [7, 'en route', 'high altitude']];
 const activeAP = new Set(AIRPORTS.map(a => a[0]));
 function selectedKeys() {
-  const winds = selectedWindKeys();
-  if (activeAP.size === AIRPORTS.length || !META.airports) return winds;
+  const winds = selectedWindKeys(), movs = V2 && document.getElementById('takeoffs').checked ? ['a', 'd'] : ['a'];
+  const scopes = activeAP.size === AIRPORTS.length ? ['all'] : [...activeAP];
   const out = [];
-  activeAP.forEach(a => winds.forEach(w => { if (META.airports[a + '/' + w]) out.push('ap/' + a + '/' + w); }));
+  scopes.forEach(sc => winds.forEach(w => movs.forEach(m => { const k = sc + '/' + w + '/' + m; if (imgInfo(k)) out.push(k); })));
   return out;
 }
 function drawAirports() {
@@ -267,47 +334,47 @@ function drawAirports() {
     list.appendChild(row);
   });
   const n = activeAP.size;
-  document.getElementById('ap-info').textContent = !META || META.airports ? (n === AIRPORTS.length ? 'All airports'
+  document.getElementById('ap-info').textContent = n === AIRPORTS.length ? 'All airports'
     : n === 0 ? 'No airports' : n > 3 ? n + ' of ' + AIRPORTS.length + ' airports'
-    : AIRPORTS.filter(a => activeAP.has(a[0])).map(a => a[1]).join(', '))
-    : 'Airports appear after the Pi\'s next daily rebuild';
+    : AIRPORTS.filter(a => activeAP.has(a[0])).map(a => a[1]).join(', ');
 }
 document.getElementById('ap-all').onclick = () => { AIRPORTS.forEach(a => activeAP.add(a[0])); drawAirports(); show(); };
 document.getElementById('ap-none').onclick = () => { activeAP.clear(); drawAirports(); show(); };
+
 let showRequest = 0;
 async function show() {
+  if (!META) return;
   const req = ++showRequest, keys = selectedKeys(), info = document.getElementById('wind-info');
   const tol = +document.getElementById('tol').value;
   const hours = selectedWindKeys().reduce((s, k) => s + (k === 'all' ? META.hours : META.wind[k].hours), 0);
   const what = MODE === 'all' ? 'All winds' : MODE === 'calm' ? 'Calm or variable'
     : `From ${String(DIR).padStart(3, '0')}° ± ${tol}° (${String((DIR - tol + 360) % 360).padStart(3, '0')}–${String((DIR + tol) % 360).padStart(3, '0')}°)`;
-  info.textContent = what + ' · ' + hours.toLocaleString() + ' hour' + (hours === 1 ? '' : 's');
+  const label = what + ' · ' + hours.toLocaleString() + ' hour' + (hours === 1 ? '' : 's');
+  info.textContent = label;
   drawDial();
-  if (!keys.length) { SHOWN = {q: new Uint8Array(META.rows * META.cols), max: 0}; paint(); return; }
-  info.textContent += ' · loading…';
-  if (keys.length === 1) {
-    let q;
-    try { q = await loadImage(keys[0]); } catch (e) { info.textContent = what + ' · could not load (' + e.message + ')'; return; }
+  const n = META.rows * META.cols, S = new Float32Array(n), B = new Float32Array(n);
+  if (keys.length) info.textContent = label + ' · loading…';
+  // one image at a time (memory on the iPad): back to weights and added up per size
+  for (const k of keys) {
+    let im;
+    try { im = await loadImage(k); } catch (e) { info.textContent = what + ' · could not load (' + e.message + ')'; return; }
     if (req !== showRequest) return;
-    SHOWN = {q, max: imgInfo(keys[0]).max};
-  } else {
-    // one image at a time (memory on the iPad): back to weights, add up,
-    // back to the same log scale for the sum
-    const n = META.rows * META.cols, sum = new Float32Array(n);
-    for (const k of keys) {
-      let q;
-      try { q = await loadImage(k); } catch (e) { info.textContent = what + ' · could not load (' + e.message + ')'; return; }
-      if (req !== showRequest) return;
-      const lw = Math.log1p(imgInfo(k).max) / 255;
-      const lut = new Float32Array(256); for (let v = 1; v < 256; v++) lut[v] = Math.expm1(v * lw);
+    const [ms, mb] = imgInfo(k).max;
+    [[im.s, ms, S], [im.b, mb, B]].forEach(([q, top, sum]) => {
+      if (!q || !top) return;
+      const lw = Math.log1p(top) / 255, lut = new Float32Array(256);
+      for (let v = 1; v < 256; v++) lut[v] = Math.expm1(v * lw);
       for (let i = 0; i < n; i++) if (q[i]) sum[i] += lut[q[i]];
-    }
-    let max = 0; for (let i = 0; i < n; i++) if (sum[i] > max) max = sum[i];
-    const q = new Uint8Array(n), s = max > 0 ? 255 / Math.log1p(max) : 0;
-    for (let i = 0; i < n; i++) if (sum[i] > 0) q[i] = Math.max(1, Math.min(255, Math.round(Math.log1p(sum[i]) * s)));
-    SHOWN = {q, max};
+    });
   }
-  info.textContent = what + ' · ' + hours.toLocaleString() + ' hour' + (hours === 1 ? '' : 's');
+  let maxS = 0, maxB = 0, max = 0;
+  for (let i = 0; i < n; i++) {
+    if (S[i] > maxS) maxS = S[i];
+    if (B[i] > maxB) maxB = B[i];
+    if (S[i] + B[i] > max) max = S[i] + B[i];
+  }
+  SHOWN = {s: S, b: B, maxS, maxB, max};
+  info.textContent = label;
   paint();
 }
 
@@ -385,6 +452,14 @@ async function load() {
     if (!r.ok) throw new Error(r.status === 404 ? 'not built yet: the Pi writes it once a day' : 'HTTP ' + r.status);
     META = await r.json();
     META.wind = META.wind || {};
+    V2 = META.version === 2;
+    if (!V2) {
+      // the Pi is still rebuilding for the colours and take-offs: single colour, arrivals only
+      document.getElementById('rebuild').hidden = false;
+      document.getElementById('rebuild').textContent = 'Colours by size and take-offs appear once the Pi finishes rebuilding (about an hour after its update).';
+      document.getElementById('takeoffs').disabled = true;
+      setColour('single');
+    }
     const from = META.first_hour ? FMT.format(new Date(META.first_hour * 1000)) : '?';
     const to = META.last_hour ? FMT.format(new Date((META.last_hour + 3600) * 1000)) : '?';
     document.getElementById('covered').textContent = from + ' – ' + to + ' · ' + META.hours.toLocaleString() + ' hours';
