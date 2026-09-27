@@ -795,11 +795,14 @@ def archive(index, files, final, end):
 def map_points_for_hour(hour):
     """One hour of the live map's positions straight from the log, with the
     map's own filters (departures dropped, is_arrival), for the heat map's
-    hours from before the first hour file kept. (t, hex, lat, lon, type)."""
+    hours from before the first hour file kept. (t, hex, lat, lon, type,
+    airport zone as in the hour files)."""
     logged = [r for r in load_points(hour - 600, hour + 3600) if r[4] <= MAX_ALT_FT]
     logged.sort(key=lambda r: (r[0], r[1]))
     departures = departure_points(logged)
-    return [(r[0], r[1], r[2], r[3], r[9]) for r in logged
+    return [(r[0], r[1], r[2], r[3], r[9],
+             AIRPORT_IDS.get(classify_airport(r[2], r[3], r[4], r[8], r[11], r[6] or 0), 7))
+            for r in logged
             if hour <= r[0] < hour + 3600 and (r[1], r[0]) not in departures
             and is_arrival(r[4], r[5] or 0, r[7] or 0, r[6] or 0, r[2], r[3], r[11], r[8])]
 

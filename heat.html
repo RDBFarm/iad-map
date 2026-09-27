@@ -41,6 +41,14 @@
     border-radius:5px; padding:2px 4px; font:inherit; }
   #tol { flex:1; }
   #wind-info { color:#fff; margin-top:4px; }
+  #aps { left:14px; top:136px; width:188px; }
+  #aps .ap-row { display:flex; align-items:center; gap:7px; padding:2px 0; cursor:pointer; user-select:none; -webkit-user-select:none; }
+  #aps .ap-row.off { opacity:0.35; }
+  #aps .ap-dot { width:10px; height:10px; border-radius:50%; border:1.5px solid currentColor; flex-shrink:0; }
+  #aps .ap-row:not(.off) .ap-dot { background:currentColor; }
+  #aps .ap-code { font-weight:600; color:#fff; width:3.2em; }
+  #aps .ap-btns { display:flex; gap:6px; margin:6px 0 2px; }
+  #aps .ap-btns .btn { flex:1; padding:3px 0; text-align:center; }
   #about { position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,0.55); display:flex; align-items:center;
     justify-content:center; padding:16px; }
   #about[hidden] { display:none; }
@@ -59,6 +67,7 @@
     .btn { padding:4px 8px; font-size:0.72rem; }
     .blbl { display:none; }
     #wind { width:176px; top:60px; right:10px; }
+    #aps { top:132px; left:10px; width:170px; }
   }
 </style>
 </head>
@@ -73,6 +82,15 @@
   <a class="btn" id="back" href="live.html">✈<span class="blbl"> Live map</span></a>
 </div>
 <div id="map"></div>
+
+<div class="panel" id="aps">
+  <h3 onclick="document.getElementById('aps').classList.toggle('folded')">✈ Airports</h3>
+  <div class="fold">
+    <div id="ap-list"></div>
+    <div class="ap-btns"><button class="btn" id="ap-all">All</button><button class="btn" id="ap-none">None</button></div>
+  </div>
+  <div id="ap-info" class="note" style="margin-top:2px">All airports</div>
+</div>
 
 <div class="panel" id="wind">
   <h3 onclick="document.getElementById('wind').classList.toggle('folded')">🧭 Wind at Dulles</h3>
@@ -166,9 +184,18 @@ const IMG = {};             // image key ('all', '000'..'350', 'calm') -> Uint8A
 let SHOWN = null;           // {q: Uint8Array, max: weight} currently drawn
 const FMT = new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric'});
 
+// Image keys: 'all' (heat.png), a wind key ('000'..'350', 'calm': heat/<key>.png),
+// or 'ap/<zone>/<all|wind>' (heat/ap/<zone>/<key>.png).
+function imgInfo(key) {
+  if (key === 'all') return {url: 'heat.png?b=' + META.built, max: META.max_weight};
+  if (key.startsWith('ap/')) { const b = META.airports[key.slice(3)]; return {url: 'heat/' + key + '.png?v=' + b.v, max: b.max_weight}; }
+  return {url: 'heat/' + key + '.png?v=' + META.wind[key].v, max: META.wind[key].max_weight};
+}
+const IMG_ORDER = [];       // most recently used last; at most IMG_KEEP decoded images kept (iPad memory)
+const IMG_KEEP = 24;
 async function loadImage(key) {
-  if (IMG[key]) return IMG[key];
-  const url = key === 'all' ? 'heat.png?b=' + META.built : 'heat/' + key + '.png?v=' + META.wind[key].v;
+  if (IMG[key]) { IMG_ORDER.splice(IMG_ORDER.indexOf(key), 1); IMG_ORDER.push(key); return IMG[key]; }
+  const url = imgInfo(key).url;
   const img = new Image();
   img.crossOrigin = 'anonymous';
   img.src = DATA_BASE + url;
@@ -179,6 +206,8 @@ async function loadImage(key) {
   ctx.drawImage(img, 0, 0);
   const rgba = ctx.getImageData(0, 0, META.cols, META.rows).data, q = new Uint8Array(META.cols * META.rows);
   for (let i = 0; i < q.length; i++) q[i] = rgba[i * 4];
+  IMG_ORDER.push(key);
+  while (IMG_ORDER.length > IMG_KEEP) delete IMG[IMG_ORDER.shift()];
   return (IMG[key] = q);
 }
 
@@ -209,36 +238,70 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') document.get
 // ── Wind selection ─────────────────────────────────────────────────────────
 let MODE = 'all', DIR = null;
 const angDiff = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
-function selectedKeys() {
+function selectedWindKeys() {
   if (MODE === 'all') return ['all'];
   if (MODE === 'calm') return META.wind.calm ? ['calm'] : [];
   const tol = +document.getElementById('tol').value;
   return Object.keys(META.wind).filter(k => k !== 'calm' && angDiff(+k, DIR) <= tol);
 }
+// Airport zones as on the live map (pi/publish.py AIRPORT_IDS).
+const AIRPORTS = [[0, 'KIAD', 'Dulles'], [1, 'KDCA', 'Reagan Natl'], [2, 'KBWI', 'BWI'], [3, 'KJYO', 'Leesburg'],
+  [4, 'KGAI', 'Gaithersburg'], [5, 'KHEF', 'Manassas'], [6, 'KRMN', 'Stafford'], [8, 'KADW', 'Andrews AFB'],
+  [9, 'KNYG', 'Quantico MCAF'], [7, 'en route', 'high altitude']];
+const activeAP = new Set(AIRPORTS.map(a => a[0]));
+function selectedKeys() {
+  const winds = selectedWindKeys();
+  if (activeAP.size === AIRPORTS.length || !META.airports) return winds;
+  const out = [];
+  activeAP.forEach(a => winds.forEach(w => { if (META.airports[a + '/' + w]) out.push('ap/' + a + '/' + w); }));
+  return out;
+}
+function drawAirports() {
+  const list = document.getElementById('ap-list');
+  list.innerHTML = '';
+  AIRPORTS.forEach(([id, code, name]) => {
+    const row = document.createElement('div');
+    row.className = 'ap-row' + (activeAP.has(id) ? '' : ' off');
+    row.innerHTML = `<span class="ap-dot"></span><span class="ap-code">${code}</span><span>${name}</span>`;
+    row.onclick = () => { if (activeAP.has(id)) activeAP.delete(id); else activeAP.add(id); drawAirports(); show(); };
+    list.appendChild(row);
+  });
+  const n = activeAP.size;
+  document.getElementById('ap-info').textContent = !META || META.airports ? (n === AIRPORTS.length ? 'All airports'
+    : n === 0 ? 'No airports' : n > 3 ? n + ' of ' + AIRPORTS.length + ' airports'
+    : AIRPORTS.filter(a => activeAP.has(a[0])).map(a => a[1]).join(', '))
+    : 'Airports appear after the Pi\'s next daily rebuild';
+}
+document.getElementById('ap-all').onclick = () => { AIRPORTS.forEach(a => activeAP.add(a[0])); drawAirports(); show(); };
+document.getElementById('ap-none').onclick = () => { activeAP.clear(); drawAirports(); show(); };
 let showRequest = 0;
 async function show() {
   const req = ++showRequest, keys = selectedKeys(), info = document.getElementById('wind-info');
   const tol = +document.getElementById('tol').value;
-  const hours = keys.reduce((s, k) => s + (k === 'all' ? META.hours : META.wind[k].hours), 0);
+  const hours = selectedWindKeys().reduce((s, k) => s + (k === 'all' ? META.hours : META.wind[k].hours), 0);
   const what = MODE === 'all' ? 'All winds' : MODE === 'calm' ? 'Calm or variable'
     : `From ${String(DIR).padStart(3, '0')}° ± ${tol}° (${String((DIR - tol + 360) % 360).padStart(3, '0')}–${String((DIR + tol) % 360).padStart(3, '0')}°)`;
   info.textContent = what + ' · ' + hours.toLocaleString() + ' hour' + (hours === 1 ? '' : 's');
   drawDial();
   if (!keys.length) { SHOWN = {q: new Uint8Array(META.rows * META.cols), max: 0}; paint(); return; }
   info.textContent += ' · loading…';
-  let imgs;
-  try { imgs = await Promise.all(keys.map(loadImage)); } catch (e) { info.textContent = what + ' · could not load (' + e.message + ')'; return; }
-  if (req !== showRequest) return;
   if (keys.length === 1) {
-    SHOWN = {q: imgs[0], max: keys[0] === 'all' ? META.max_weight : META.wind[keys[0]].max_weight};
+    let q;
+    try { q = await loadImage(keys[0]); } catch (e) { info.textContent = what + ' · could not load (' + e.message + ')'; return; }
+    if (req !== showRequest) return;
+    SHOWN = {q, max: imgInfo(keys[0]).max};
   } else {
-    // back to weights, add up, back to the same log scale for the sum
+    // one image at a time (memory on the iPad): back to weights, add up,
+    // back to the same log scale for the sum
     const n = META.rows * META.cols, sum = new Float32Array(n);
-    keys.forEach((k, j) => {
-      const lw = Math.log1p(META.wind[k].max_weight) / 255, q = imgs[j];
+    for (const k of keys) {
+      let q;
+      try { q = await loadImage(k); } catch (e) { info.textContent = what + ' · could not load (' + e.message + ')'; return; }
+      if (req !== showRequest) return;
+      const lw = Math.log1p(imgInfo(k).max) / 255;
       const lut = new Float32Array(256); for (let v = 1; v < 256; v++) lut[v] = Math.expm1(v * lw);
       for (let i = 0; i < n; i++) if (q[i]) sum[i] += lut[q[i]];
-    });
+    }
     let max = 0; for (let i = 0; i < n; i++) if (sum[i] > max) max = sum[i];
     const q = new Uint8Array(n), s = max > 0 ? 255 / Math.log1p(max) : 0;
     for (let i = 0; i < n; i++) if (sum[i] > 0) q[i] = Math.max(1, Math.min(255, Math.round(Math.log1p(sum[i]) * s)));
@@ -312,8 +375,8 @@ document.getElementById('tol').addEventListener('input', e => {
   document.getElementById('tol-v').textContent = e.target.value + '°';
   if (MODE === 'dir') { drawDial(); clearTimeout(dragTimer); dragTimer = setTimeout(show, 150); }
 });
-// on a phone both panels start folded; tap a title to open it
-if (window.innerWidth <= 640) ['legend', 'wind'].forEach(id => document.getElementById(id).classList.add('folded'));
+// on a phone the panels start folded; tap a title to open it
+if (window.innerWidth <= 640) ['legend', 'wind', 'aps'].forEach(id => document.getElementById(id).classList.add('folded'));
 
 async function load() {
   const status = document.getElementById('status');
@@ -328,12 +391,14 @@ async function load() {
     status.textContent = META.aircraft_hours.toLocaleString() + ' aircraft-hours, ' + from + ' – ' + to +
       '. Rebuilt once a day, last ' + FMT.format(new Date(META.built * 1000)) + '.' +
       (META.no_wind_hours ? ' ' + META.no_wind_hours + ' hours had no wind report and are in "All winds" only.' : '');
+    drawAirports();
     await show();
   } catch (e) {
     status.textContent = 'No heat map yet (' + e.message + ').';
   }
 }
 drawDial();
+drawAirports();
 load();
 </script>
 </body>
