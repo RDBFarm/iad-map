@@ -815,13 +815,14 @@ def log_start():
         return None
 
 
-def update_heat(index, final, now):
+def update_heat(index, final, now, wx=None):
     """The history heat map (heatmap.py): add new settled hours; write heat.png
     and heat.json at most once a day. Never stops the map."""
     try:
         wrote = heatmap.update(WORK_DIR, final, tracks.parse_name, tracks.hour_name,
                                map_points_for_hour, now,
-                               os.path.join(os.path.dirname(DB_PATH), "heat"), db_start=log_start())
+                               os.path.join(os.path.dirname(DB_PATH), "heat"), db_start=log_start(),
+                               wx=wx, wx_fetch=lambda hours: fetch_weather(now - hours * 3600, hours=hours))
         if wrote:
             print("publish: heat map rewritten", flush=True)
         if os.path.exists(os.path.join(WORK_DIR, "heat.json")):
@@ -870,7 +871,7 @@ def main():
     index["farm"]["summary"] = farm.summary(index["farm"]["passes"])
     enrich(index)
     final = archive(index, files, final | (frozen - set(files)), index["meta"]["end"])
-    update_heat(index, final, index["meta"]["end"])
+    update_heat(index, final, index["meta"]["end"], wx)
     m = index["meta"]
     print(f"publish: {m['positions']} positions, {m['aircraft']} aircraft, "
           f"{m['mlat_positions']} MLAT positions, {m['aircraft_mlat_only']} aircraft seen only by MLAT, "
