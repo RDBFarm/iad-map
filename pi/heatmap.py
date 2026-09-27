@@ -1,51 +1,55 @@
 #!/usr/bin/env python3
-"""The history heat map: every aircraft path the map has shown, summed,
-overall and by the wind at Dulles at the time.
+"""The history heat map: every aircraft path near Dulles, summed, by the
+wind at the time, by airport zone, by aircraft size, arrivals and take-offs.
 
-Owner's requests, 2026-09-27: a heat map over the history of the database
-where "the resulting lines shouldn't get broader, just brighter, and with
-the absolute size of the planes weighting the brightness as well. So an
-approach that has 100 private planes would have the same brightness as 10
-commercial planes (in the broadest sense possible)"; then, "I want to be
-able to type a degree or use a pointer to move the wind position. So we can
-see what the heat map looks like when the wind is blowing at any one
-direction."
+Owner's requests, 2026-09-27, in order:
+  - "a heatmap over the history of the database ... the resulting lines
+    shouldn't get broader, just brighter, and with the absolute size of the
+    planes weighting the brightness as well. So an approach that has 100
+    private planes would have the same brightness as 10 commercial planes
+    (in the broadest sense possible)."
+  - "type a degree or use a pointer to move the wind position. So we can see
+    what the heat map looks like when the wind is blowing at any one
+    direction."
+  - "give me just airports to select."
+  - plane size in two colours, "orange and blue", and "departures added or
+    selectable".
 
+How it is built:
   - A fixed grid of cells about 110 m square over the map's area. Each
     aircraft's path is drawn through the cells it crosses, and each cell
     counts an aircraft once per hour however many positions it sent there,
-    so a slow aircraft or a 2-second log does not brighten a cell more than
-    a fast one. Lines keep one cell's width; more traffic only adds weight.
+    so lines keep one cell's width; more traffic only adds weight.
   - Weight by size, ICAO wake turbulence category (aircraft_types.json
-    "wtc"): light (up to ~7 t: private planes, most helicopters) 1; medium
-    and heavy (airliners, regional and business jets, widebodies) 10. An
-    unknown type counts 1: most are private planes.
-  - The same positions as the live map: within 50 miles of Dulles, at or
-    below 15,000 ft, departures dropped. Frozen hour files (h/) are read
-    back; hours from before the first one kept are built once from the log.
+    "wtc"): small = light (up to ~7 t: private planes, most helicopters) 1;
+    big = medium and heavy (airliners, regional and business jets,
+    widebodies) 10. An unknown type counts as small.
+  - Positions within 50 miles of Dulles at or below 15,000 ft, from the log
+    (publish.heat_points_for_hour). "Arrivals" are exactly the live map's
+    positions (take-offs dropped by its rules); "take-offs" are the airborne
+    positions those rules drop (departure climbs and fast climb-outs).
   - Wind: KIAD's report nearest the middle of each hour (the direction it
-    blows FROM, to 10 degrees, as reports give it), kept in state.json as it
-    arrives. Each hour also goes into that direction's grid, or "calm"
+    blows FROM, to 10 degrees), kept in state.json as it arrives, or "calm"
     (calm or variable). An hour waits for its wind; one still without it
-    WIND_WAIT_S after it ended goes into the overall grid only.
-  - Airports (owner, 2026-09-27: "give me just airports to select"): the
-    live map's airport zones (publish.classify_airport; 0-9, 7 = en route).
-    Each aircraft's cells in an hour are also split by the zone of the
-    position that reached them first, into heat/ap/<id>/all and
-    heat/ap/<id>/<wind>, so airports combine exactly with the wind: the
-    zones add up to the total.
-  - The grids are kept on the drive (heat/, float32) and grow forever,
-    beyond the 30 days of hour files. The images are rewritten at most once
-    a day, and only the wind grids that got new hours, so the upload is
-    small.
+    WIND_WAIT_S after it ended counts under all winds only.
+  - Airport zones: the live map's (publish.classify_airport; 0-9, 7 = en
+    route), of the position that first reached the cell.
+  - Every combination is its own grid, so any selection adds up exactly:
+    heat/g/<scope>/<wind>/<class>.f32, scope "all" or a zone id, wind "all"
+    or a wind key, class a/d (arrival/take-off) + s/b (small/big).
+  - The grids live on the drive, grow forever, and are edited in place
+    (memory-mapped, one at a time). Images are rewritten at most once a day,
+    only those whose grids changed. A rebuild (a new version of this file's
+    layout) runs MAX_HOURS_PER_RUN hours per publish so the live map is never
+    held up; the old images stay until the new ones are complete.
 
-Images: 8-bit greyscale PNG, one pixel per cell, north up; 0 = nothing,
-else round(255 * log(1 + w) / log(1 + max)), max per image in heat.json.
-heat.png is all winds; heat/<dir>.png (000..350) and heat/calm.png by wind;
-heat/ap/<id>/all.png and heat/ap/<id>/<wind>.png by airport zone.
+Images: heat/v2/<scope>/<wind>/<a|d>.png, RGB, one pixel per cell, north up:
+red = small aircraft, green = big aircraft (blue unused), each
+round(255 * ln(1 + w) / ln(1 + max)) with its max in heat.json.
 """
-import array, itertools, json, math, mmap, os, struct, time, zlib
+import itertools, json, math, mmap, os, shutil, struct, time, zlib
 
+VERSION = 2
 # The area: the map's 50-mile circle around Dulles (publish.CENTER, RADIUS_NM)
 LAT_MIN, LAT_MAX = 38.215, 39.675
 LON_MIN, LON_MAX = -78.392, -76.520
@@ -55,10 +59,12 @@ ROWS = round((LAT_MAX - LAT_MIN) / DLAT)
 COLS = round((LON_MAX - LON_MIN) / DLON)
 WEIGHT = {"L": 1.0, "M": 10.0, "H": 10.0, "J": 10.0}
 UNKNOWN_WEIGHT = 1.0
-MAX_GAP_S = 30           # a longer silence breaks the line (no drawing across it)
-REPUBLISH_S = 20 * 3600  # images at most about once a day
-WIND_WAIT_S = 30 * 3600  # an hour waits this long for its wind report
-WIND_KEYS = [f"{d:03d}" for d in range(0, 360, 10)] + ["calm"]
+MAX_GAP_S = 30            # a longer silence breaks the line (no drawing across it)
+REPUBLISH_S = 20 * 3600   # images at most about once a day
+WIND_WAIT_S = 30 * 3600   # an hour waits this long for its wind report
+SETTLE_S = 600            # an hour is added this long after it ends
+MAX_HOURS_PER_RUN = 12    # a rebuild is spread over runs
+CLASSES = ("as", "ab", "ds", "db")
 
 
 def _wtc_table():
@@ -93,56 +99,35 @@ def line_cells(a, b):
     return out
 
 
-def hour_cells_split(points):
-    """points: (t, hex, lat, lon, type, airport) for one hour ->
-    ({cell: weight}, {airport: {cell: weight}}, aircraft). Each aircraft adds
-    its weight once to every cell its path crosses; the cell goes to the
-    airport zone of the position that first reached it, so the zones add up
-    to the total."""
+def hour_cells(points):
+    """points: (t, hex, lat, lon, type, zone, movement 'a'|'d') for one hour
+    -> ({(zone, class): {cell: weight}}, aircraft). Each aircraft adds its
+    weight once to every cell its path crosses; the cell goes to the zone and
+    movement of the position that first reached it, the class to the
+    aircraft's size, so all the parts add up to the total."""
     by_hex = {}
-    for t, hexid, lat, lon, actype, ap in points:
-        by_hex.setdefault(hexid, []).append((t, lat, lon, actype, ap))
-    total, by_ap = {}, {}
+    for t, hexid, lat, lon, actype, zone, mov in points:
+        by_hex.setdefault(hexid, []).append((t, lat, lon, actype, zone, mov))
+    out = {}
     for pts in by_hex.values():
         pts.sort()
         cells, prev, actype = {}, None, ""
-        for t, lat, lon, ty, ap in pts:
+        for t, lat, lon, ty, zone, mov in pts:
             actype = ty or actype
             seg = line_cells((prev[1], prev[2]) if prev and t - prev[0] <= MAX_GAP_S else (lat, lon), (lat, lon))
             for k in seg:
-                cells.setdefault(k, ap)
+                cells.setdefault(k, (zone, mov))
             prev = (t, lat, lon)
         w = weight(actype)
-        for k, ap in cells.items():
-            total[k] = total.get(k, 0.0) + w
-            d = by_ap.setdefault(ap, {})
+        size = "b" if w > 1 else "s"
+        for k, (zone, mov) in cells.items():
+            d = out.setdefault((zone, mov + size), {})
             d[k] = d.get(k, 0.0) + w
-    return total, by_ap, len(by_hex)
-
-
-def hour_cells(points):
-    """({cell: weight}, aircraft) for one hour; points as hour_cells_split's."""
-    total, _, n = hour_cells_split(points)
-    return total, n
-
-
-def add_hour(acc, points):
-    """Adds one hour to a grid. Returns aircraft counted."""
-    cells, n = hour_cells(points)
-    for k, w in cells.items():
-        acc[k] += w
-    return n
-
-
-def points_from_hour_file(path):
-    with open(path) as f:
-        body = json.load(f)
-    ac, start = body["ac"], body["start"]
-    return [(start + p[3], ac[p[5]][0], p[0], p[1], ac[p[5]][2], p[4]) for p in body["pts"]]
+    return out, len(by_hex)
 
 
 def wind_key(wind):
-    """'calm' or a direction (degrees, from) -> the grid it goes in."""
+    """'calm' or a direction (degrees, from) -> its wind key."""
     if wind == "calm":
         return "calm"
     return f"{int(round(float(wind) / 10.0)) % 36 * 10:03d}"
@@ -164,40 +149,42 @@ def winds_by_hour(wx):
     return {h: v for h, (d, v) in best.items() if v is not None}
 
 
-def png_grey(rows, cols, data):
-    """8-bit greyscale PNG from a bytes-like of rows*cols values."""
-    data = bytes(data)
-    raw = b"".join(b"\x00" + data[r * cols:(r + 1) * cols] for r in range(rows))
-    def chunk(kind, body):
-        c = struct.pack(">I", len(body)) + kind + body
-        return c + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", cols, rows, 8, 0, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
+def _chunk(kind, body):
+    c = struct.pack(">I", len(body)) + kind + body
+    return c + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
 
 
-def grid_image(acc):
-    """(PNG bytes, largest weight) of a grid, log-scaled. Only lit cells are
-    visited (most wind and airport grids are sparse)."""
+def png(rows, cols, data, channels):
+    """8-bit PNG, greyscale (1 channel) or RGB (3), from rows*cols*channels bytes."""
+    data, w = bytes(data), cols * channels
+    raw = b"".join(b"\x00" + data[r * w:(r + 1) * w] for r in range(rows))
+    return (b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", struct.pack(">IIBBBBB", cols, rows, 8, 0 if channels == 1 else 2, 0, 0, 0))
+            + _chunk(b"IDAT", zlib.compress(raw, 9)) + _chunk(b"IEND", b""))
+
+
+def log_bytes(acc):
+    """(bytearray of log-scaled 1..255 per lit cell, largest weight). Only
+    lit cells are visited (most grids are sparse)."""
     lit = list(itertools.compress(range(len(acc)), acc))
     top = max((acc[i] for i in lit), default=0.0)
-    data = bytearray(len(acc))
+    out = bytearray(len(acc))
     if top > 0:
         scale = 255 / math.log1p(top)
         for i in lit:
             v = acc[i]
             if v > 0:
-                data[i] = max(1, min(255, round(math.log1p(v) * scale)))
-    return png_grey(ROWS, COLS, data), top
+                out[i] = max(1, min(255, round(math.log1p(v) * scale)))
+    return out, top
 
 
 class Grid:
-    """A float32 grid file, edited in place (memory-mapped): with ~400 grids
-    the Pi only holds the pages an hour touches, not 8.5 MB per grid."""
+    """A float32 grid file, edited in place (memory-mapped)."""
     def __init__(self, path):
         self.path = path
-        os.makedirs(os.path.dirname(path), exist_ok=True)
         size = 4 * ROWS * COLS
         if not os.path.exists(path) or os.path.getsize(path) != size:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "wb") as f:
                 f.truncate(size)               # a sparse file: no disk used until written
         self.f = open(path, "r+b")
@@ -209,190 +196,168 @@ class Grid:
         for k, w in cells.items():
             acc[k] += w
 
-    def save(self):
-        self.mm.flush()
-
     def close(self):
+        self.mm.flush()
         self.acc.release()
         self.mm.close()
         self.f.close()
 
 
+def add_to(path, cells):
+    g = Grid(path)
+    try:
+        g.add(cells)
+    finally:
+        g.close()
+
+
 class State:
     def __init__(self, state_dir):
         self.dir = state_dir
-        os.makedirs(os.path.join(state_dir, "wind"), exist_ok=True)
         self.path = os.path.join(state_dir, "state.json")
+        os.makedirs(state_dir, exist_ok=True)
         try:
             with open(self.path) as f:
                 self.s = json.load(f)
         except (OSError, ValueError):
             self.s = {}
-        if self.s.get("hours") and not os.path.exists(os.path.join(state_dir, "acc.f32")):
-            self.s = {}                        # the grids are gone: start again
-        self.s.setdefault("hours", [])
-        self.s.setdefault("aircraft_hours", 0)
-        self.s.setdefault("published", 0)
-        self.s.setdefault("wind", {})          # hour -> "calm" or degrees
-        self.s.setdefault("bins", {})          # key -> {"hours", "aircraft_hours", "v"}
-        self.s.setdefault("dirty", [])         # wind grids changed since the last images
-        self.s.setdefault("no_wind_hours", 0)
-        self.s.setdefault("ap_hours", [])      # hours already split by airport zone
-        self.s.setdefault("ap_bins", {})       # "id/key" -> {"hours", "aircraft_hours", "v"}
-        self.s.setdefault("ap_dirty", [])
+        if self.s.get("version") != VERSION:
+            # a new layout: rebuild every hour from the log, keeping the winds
+            winds = self.s.get("wind", {})
+            for old in ("acc.f32", "wind", "ap", "g"):
+                p = os.path.join(state_dir, old)
+                if os.path.isdir(p):
+                    shutil.rmtree(p)
+                elif os.path.exists(p):
+                    os.remove(p)
+            self.s = {"version": VERSION, "wind": winds, "wind_backfilled": bool(winds)}
+        for k, v in (("hours", []), ("aircraft_hours", 0), ("published", 0), ("wind", {}),
+                     ("hours_by_wind", {}), ("images", {}), ("dirty", []), ("no_wind_hours", 0)):
+            self.s.setdefault(k, v)
         self.done = set(self.s["hours"])
-        self.ap_done = set(self.s["ap_hours"])
 
-    def grid_path(self, key):
-        return os.path.join(self.dir, "acc.f32") if key is None else os.path.join(self.dir, "wind", key + ".f32")
-
-    def ap_path(self, apkey):
-        return os.path.join(self.dir, "ap", apkey + ".f32")
+    def grid(self, scope, wind, cls):
+        return os.path.join(self.dir, "g", str(scope), wind, cls + ".f32")
 
     def save(self):
         self.s["hours"] = sorted(self.done)
-        self.s["ap_hours"] = sorted(self.ap_done)
         with open(self.path + ".tmp", "w") as f:
             json.dump(self.s, f)
         os.replace(self.path + ".tmp", self.path)
 
 
-def update(work_dir, final_names, parse_name, hour_name, db_hours, now, state_dir,
-           db_start=None, wx=None, wx_fetch=None, force=False):
-    """Add every settled hour not added yet, overall and in its wind grid:
-    from its frozen h/ file, or, for hours before the first file kept, from
-    the log (db_hours(hour) -> points). wx: this run's weather reports;
-    wx_fetch(hours) -> older ones, used once for hours past this run's.
-    Writes heat.png, heat/<key>.png and heat.json into work_dir when a day
-    has passed since the last time (or they are missing). Returns True if
-    it wrote them."""
+def update(work_dir, db_hours, now, state_dir, db_start=None, wx=None, wx_fetch=None, force=False):
+    """Add every settled hour of the log not added yet (at most
+    MAX_HOURS_PER_RUN per call), into every grid it belongs to.
+    db_hours(hour) -> points as hour_cells() takes them. wx: this run's
+    weather reports; wx_fetch(hours) -> older ones, used once. Writes the
+    images and heat.json into work_dir when there is nothing left to add and
+    a day has passed since the last time (or they are from an older layout).
+    Returns True if it wrote them."""
     st = State(state_dir)
     wind = st.s["wind"]
     for h, v in winds_by_hour(wx).items():
         wind.setdefault(str(h), v)
-    finals = sorted(parse_name(n)[1] for n in final_names
-                    if parse_name(n) and parse_name(n)[0] == "h")
-    first_file = finals[0] if finals else None
-    todo = []
-    if db_start is not None and first_file is not None:
-        hour = db_start - db_start % 3600
-        while hour < first_file:
-            todo.append((hour, None))
-            hour += 3600
-    todo += [(h, os.path.join(work_dir, hour_name("h", h))) for h in finals]
-    todo = [(h, p) for h, p in todo if h not in st.done]
-    # hours past what this run's weather covers: fetch older reports once
-    if wx_fetch and any(str(h) not in wind for h, _ in todo) and not st.s.get("wind_backfilled"):
-        oldest = min(h for h, _ in todo if str(h) not in wind)
+    if db_start is None:
+        st.save()
+        return False
+    last = int(now) - SETTLE_S - 3600
+    last -= last % 3600
+    todo = [h for h in range(db_start - db_start % 3600, last + 1, 3600) if h not in st.done]
+    if wx_fetch and todo and not st.s.get("wind_backfilled") and any(str(h) not in wind for h in todo):
+        oldest = min(h for h in todo if str(h) not in wind)
         for h, v in winds_by_hour(wx_fetch(min(168, math.ceil((now - oldest) / 3600) + 2))).items():
             wind.setdefault(str(h), v)
         st.s["wind_backfilled"] = True
     ready = []
-    for h, p in todo:
+    for h in todo:
         w = wind.get(str(h))
         if w is None and now - (h + 3600) < WIND_WAIT_S:
             continue                           # its wind may still come
-        ready.append((h, p, None if w is None else wind_key(w), True))
-    # hours added before airports existed: split them by airport zone once
-    sources = dict(todo)
-    sources.update({h: os.path.join(work_dir, hour_name("h", h)) for h in finals})
-    for h in sorted(st.done - st.ap_done):
-        p = sources.get(h)
-        if p is None and first_file is not None and h < first_file and db_start is not None and h >= db_start - db_start % 3600:
-            p = ""                             # before the first hour file: from the log
-        if p is None or (p and not os.path.exists(p)):
-            st.ap_done.add(h)                  # its hour file is gone (older than the files kept)
-            st.s["ap_missing_hours"] = st.s.get("ap_missing_hours", 0) + 1
-            continue
-        w = wind.get(str(h))
-        ready.append((h, p or None, None if w is None else wind_key(w), False))
-    grids = {}
-    def grid(path):
-        if path not in grids:
-            grids[path] = Grid(path)
-        return grids[path]
-    def count(bins, key, n):
-        b = bins.setdefault(key, {"hours": 0, "aircraft_hours": 0, "v": 0})
-        b["hours"] += 1
-        b["aircraft_hours"] += n
+        ready.append((h, None if w is None else wind_key(w)))
+    backlog = len(ready) > MAX_HOURS_PER_RUN
+    for h, key in ready[:MAX_HOURS_PER_RUN]:
+        parts, n = hour_cells(db_hours(h))
+        winds = ["all", key] if key else ["all"]
+        overall = {}
+        for (zone, cls), cells in parts.items():
+            o = overall.setdefault(cls, {})
+            for k, w in cells.items():
+                o[k] = o.get(k, 0.0) + w
+            for wk in winds:
+                add_to(st.grid(zone, wk, cls), cells)
+                img = f"{zone}/{wk}/{cls[0]}"
+                if img not in st.s["dirty"]:
+                    st.s["dirty"].append(img)
+        for cls, cells in overall.items():
+            for wk in winds:
+                add_to(st.grid("all", wk, cls), cells)
+                img = f"all/{wk}/{cls[0]}"
+                if img not in st.s["dirty"]:
+                    st.s["dirty"].append(img)
+        st.s["aircraft_hours"] += n
+        if key:
+            st.s["hours_by_wind"][key] = st.s["hours_by_wind"].get(key, 0) + 1
+        else:
+            st.s["no_wind_hours"] += 1
+        st.done.add(h)
+        st.save()                              # after each hour: a crash loses at most the hour in hand
+    meta_path = os.path.join(work_dir, "heat.json")
     try:
-        for h, p, key, new in ready:
-            cells, by_ap, n = hour_cells_split(points_from_hour_file(p) if p else db_hours(h))
-            if new:
-                grid(st.grid_path(None)).add(cells)
-                st.s["aircraft_hours"] += n
-                if key:
-                    grid(st.grid_path(key)).add(cells)
-                    count(st.s["bins"], key, n)
-                    if key not in st.s["dirty"]:
-                        st.s["dirty"].append(key)
-                else:
-                    st.s["no_wind_hours"] += 1
-                st.done.add(h)
-            for ap, apcells in by_ap.items():
-                for k in (["all", key] if key else ["all"]):
-                    apkey = f"{ap}/{k}"
-                    grid(st.ap_path(apkey)).add(apcells)
-                    count(st.s["ap_bins"], apkey, 0)   # hours per zone; aircraft not split
-                    if apkey not in st.s["ap_dirty"]:
-                        st.s["ap_dirty"].append(apkey)
-            st.ap_done.add(h)
-    finally:
-        for g in grids.values():
-            g.save()
-            g.close()
-    # a year of hourly winds is ~9,000 entries; keep them all (they are small)
-    st.save()
-    png_path = os.path.join(work_dir, "heat.png")
-    due = force or not os.path.exists(png_path) or now - st.s["published"] >= REPUBLISH_S
-    if not (due and st.done):
+        with open(meta_path) as f:
+            old_version = json.load(f).get("version")
+    except (OSError, ValueError):
+        old_version = None
+    due = force or old_version != VERSION or now - st.s["published"] >= REPUBLISH_S
+    if backlog or not due or not st.done:
         return False
-    os.makedirs(os.path.join(work_dir, "heat"), exist_ok=True)
-    g = Grid(st.grid_path(None))
-    png, top = grid_image(g.acc)
-    g.close()
-    with open(png_path + ".tmp", "wb") as f:
-        f.write(png)
-    os.replace(png_path + ".tmp", png_path)
-    def write_image(grid_file, png_rel, info):
-        g = Grid(grid_file)
-        bpng, btop = grid_image(g.acc)
-        g.close()
-        path = os.path.join(work_dir, "heat", png_rel)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path + ".tmp", "wb") as f:
-            f.write(bpng)
-        os.replace(path + ".tmp", path)
-        info.update(max_weight=round(btop, 1), v=int(now))
-    for key in st.s["dirty"]:
-        write_image(st.grid_path(key), key + ".png", st.s["bins"][key])
+    if old_version != VERSION:
+        # the first images of this layout replace the old ones
+        if os.path.exists(os.path.join(work_dir, "heat.png")):
+            os.remove(os.path.join(work_dir, "heat.png"))
+        if os.path.isdir(os.path.join(work_dir, "heat")):
+            shutil.rmtree(os.path.join(work_dir, "heat"))
+    for img in st.s["dirty"]:
+        scope, wk, mov = img.split("/")
+        chans, tops = [], []
+        for size in "sb":
+            path = st.grid(scope, wk, mov + size)
+            if os.path.exists(path):
+                g = Grid(path)
+                b, top = log_bytes(g.acc)
+                g.close()
+            else:
+                b, top = bytearray(ROWS * COLS), 0.0
+            chans.append(b)
+            tops.append(round(top, 1))
+        rgb = bytearray(3 * ROWS * COLS)
+        rgb[0::3], rgb[1::3] = chans
+        out = os.path.join(work_dir, "heat", "v2", scope, wk, mov + ".png")
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out + ".tmp", "wb") as f:
+            f.write(png(ROWS, COLS, rgb, 3))
+        os.replace(out + ".tmp", out)
+        st.s["images"][img] = {"max": tops, "v": int(now)}
     st.s["dirty"] = []
-    for apkey in st.s["ap_dirty"]:
-        write_image(st.ap_path(apkey), "ap/" + apkey + ".png", st.s["ap_bins"][apkey])
-    st.s["ap_dirty"] = []
     meta = {
-        "bounds": [[LAT_MIN, LON_MIN], [LAT_MAX, LON_MAX]], "rows": ROWS, "cols": COLS,
-        "cell_m": 111, "max_weight": round(top, 1),
+        "version": VERSION,
+        "bounds": [[LAT_MIN, LON_MIN], [LAT_MAX, LON_MAX]], "rows": ROWS, "cols": COLS, "cell_m": 111,
         "first_hour": min(st.done), "last_hour": max(st.done),
         "hours": len(st.done), "aircraft_hours": st.s["aircraft_hours"],
         "no_wind_hours": st.s["no_wind_hours"],
-        "weights": {"light": WEIGHT["L"], "medium": WEIGHT["M"], "heavy": WEIGHT["H"],
-                    "unknown": UNKNOWN_WEIGHT},
-        "scale": "log: pixel = round(255 * ln(1 + w) / ln(1 + max_weight))",
-        "wind": {k: {"hours": b["hours"], "aircraft_hours": b["aircraft_hours"],
-                     "max_weight": b.get("max_weight", 0), "v": b["v"]}
-                 for k, b in sorted(st.s["bins"].items())},
-        "wind_note": "KIAD report nearest the middle of each hour; direction the wind blows FROM, "
-                     "to 10 degrees; 'calm' is calm or variable. Image: heat/<key>.png.",
-        "airports": {apkey: {"hours": b["hours"], "max_weight": b.get("max_weight", 0), "v": b["v"]}
-                     for apkey, b in sorted(st.s["ap_bins"].items())},
-        "airports_note": "Airport zones as on the live map (0 KIAD, 1 KDCA, 2 KBWI, 3 KJYO, 4 KGAI, 5 KHEF, "
-                         "6 KRMN, 7 en route, 8 KADW, 9 KNYG); '<id>/all' all winds, '<id>/<wind>' by wind. "
-                         "Image: heat/ap/<id>/<key>.png. The zones add up to the total.",
+        "wind": {k: {"hours": n} for k, n in sorted(st.s["hours_by_wind"].items())},
+        "images": st.s["images"],
+        "weights": {"small": WEIGHT["L"], "big": WEIGHT["M"], "unknown": UNKNOWN_WEIGHT},
+        "note": "Image heat/v2/<scope>/<wind>/<a|d>.png: scope 'all' or airport zone (0 KIAD, 1 KDCA, "
+                "2 KBWI, 3 KJYO, 4 KGAI, 5 KHEF, 6 KRMN, 7 en route, 8 KADW, 9 KNYG); wind 'all', "
+                "000..350 (from) or calm; a = arrivals (the live map's positions), d = take-offs. "
+                "Red channel small aircraft, green big; pixel = round(255 ln(1+w) / ln(1+max)), "
+                "max per channel in images[key].max.",
         "built": int(now),
     }
-    with open(os.path.join(work_dir, "heat.json"), "w") as f:
+    with open(meta_path + ".tmp", "w") as f:
         json.dump(meta, f, separators=(",", ":"))
+    os.replace(meta_path + ".tmp", meta_path)
     st.s["published"] = int(now)
     st.save()
     return True
