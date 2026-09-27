@@ -41,6 +41,14 @@
     border-radius:5px; padding:2px 4px; font:inherit; }
   #tol { flex:1; }
   #wind-info { color:#fff; margin-top:4px; }
+  #about { position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,0.55); display:flex; align-items:center;
+    justify-content:center; padding:16px; }
+  #about[hidden] { display:none; }
+  .about-box { position:relative; background:#12121e; border:1px solid rgba(255,255,255,0.15); border-radius:12px;
+    max-width:520px; max-height:calc(100% - 32px); overflow-y:auto; padding:18px 20px; font-size:0.82rem; line-height:1.55; color:#dde; }
+  .about-box h2 { font-size:1rem; color:#fff; margin:0 28px 10px 0; }
+  .about-box p { margin-bottom:10px; }
+  .about-close { position:absolute; top:10px; right:12px; background:none; border:none; color:#aab; font-size:1.1rem; cursor:pointer; }
   .leaflet-tooltip.ap-label { background:rgba(255,255,255,0.85); color:#111; border:none; box-shadow:none;
     font-size:0.66rem; font-weight:600; padding:1px 4px; border-radius:3px; }
   .leaflet-tooltip.ap-label::before { display:none; }
@@ -49,6 +57,7 @@
     #hdr .sub { display:none; }
     #hdr h1 { font-size:0.9rem; }
     .btn { padding:4px 8px; font-size:0.72rem; }
+    .blbl { display:none; }
     #wind { width:176px; top:60px; right:10px; }
   }
 </style>
@@ -60,7 +69,8 @@
     <div class="sub">Every path the live map has shown, added up · <span id="covered">loading…</span></div>
   </div>
   <span style="margin-left:auto"></span>
-  <a class="btn" id="back" href="live.html">✈ Live map</a>
+  <button class="btn" id="btn-about" onclick="document.getElementById('about').hidden = false" title="How this map is made">ⓘ<span class="blbl"> How it works</span></button>
+  <a class="btn" id="back" href="live.html">✈<span class="blbl"> Live map</span></a>
 </div>
 <div id="map"></div>
 
@@ -78,15 +88,33 @@
   <div id="wind-info">All winds</div>
 </div>
 
+<div id="about" hidden onclick="if (event.target === this) this.hidden = true">
+  <div class="about-box" role="dialog" aria-label="How this map is made">
+    <button class="about-close" aria-label="Close" onclick="document.getElementById('about').hidden = true">✕</button>
+    <h2>How this map is made</h2>
+    <p><b>Every path the live map has shown, added up.</b> Same traffic as the live map: within 50 miles of Dulles,
+      below 15,000 ft, take-offs left out. It starts when the farm's receiver started logging and keeps growing;
+      the Pi rebuilds it once a day.</p>
+    <p><b>Brighter, not broader.</b> The map is a grid of cells about 110 m (360 ft) square. Each aircraft lights
+      every cell its path crosses, once per pass (per hour), however slowly it flies or however many positions it
+      sends. A route flown a thousand times is as thin as one flown once, just brighter.</p>
+    <p><b>Weighted by size.</b> A small plane counts 1; an airliner, regional jet or business jet counts 10, so
+      100 private planes glow like 10 airliners. Size comes from each type's official wake-turbulence class:
+      light (up to about 7 tonnes: private planes, most helicopters) = 1; medium and heavy = 10. An aircraft of
+      unknown type counts 1.</p>
+    <p><b>Colours.</b> Dim purple for a little traffic to bright yellow for the most, on a log scale so quiet routes
+      still show next to the busiest ones. The numbers under the colour bar are those weights. Contrast brings out
+      faint routes.</p>
+    <p><b>Wind.</b> Each hour is filed under Dulles's wind at the time: the report nearest the middle of the hour,
+      the direction the wind blows <b>from</b> (as weather reports give it), to 10°. Calm includes variable winds.
+      The ticks around the dial show how many hours each direction has.</p>
+  </div>
+</div>
+
 <div class="panel" id="legend">
   <h3 onclick="document.getElementById('legend').classList.toggle('folded')">Traffic, weighted by size</h3>
   <div id="ramp"></div>
   <div id="ramp-lbl"><span id="lbl-lo">1</span><span id="lbl-mid"></span><span id="lbl-hi">—</span></div>
-  <div class="note fold">A small plane counts 1, an airliner or business jet 10: 100 private planes glow like 10 airliners.
-    Each aircraft counts once per cell it crosses (cells ~110 m), so busy routes get brighter, not wider.
-    Log scale. Same traffic as the live map: within 50 mi of Dulles, below 15,000 ft, take-offs left out.</div>
-  <div class="note fold">Wind: KIAD's report nearest the middle of each hour, the direction it blows <b>from</b>
-    (as weather reports give it), to 10°. Calm includes variable.</div>
   <div class="note fold">Contrast <input type="range" id="gamma" min="30" max="200" value="100" aria-label="Contrast"></div>
   <div class="note" id="status">Loading the heat map…</div>
 </div>
@@ -176,6 +204,7 @@ function paint() {
   document.getElementById('lbl-hi').textContent = SHOWN.max ? Math.round(SHOWN.max).toLocaleString() : '—';
 }
 document.getElementById('gamma').addEventListener('input', paint);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') document.getElementById('about').hidden = true; });
 
 // ── Wind selection ─────────────────────────────────────────────────────────
 let MODE = 'all', DIR = null;
