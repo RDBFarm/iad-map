@@ -238,6 +238,8 @@ See `README.md` for how to install. In short:
 
 - **Installed and verified 09-27** (installer run ~3:30 PM): first heat build covered 77 hours, Thu Sep 24 10 AM – Sun Sep 27 3 PM, 10,194 aircraft-hours, all with a wind report. Only northerly winds so far (310°–050°; most hours at 320° and 000°/350°), so south-flow views are empty until the wind turns. First upload of all images 2.9 MB (heat.png 834 KB, wind images 55–324 KB each); after that, heat.png plus the wind images that got new hours, once a day.
 
+- **CARTO basemaps need the key** (09-27): `heat.html` first loaded `dark_all` tiles without `?key=…`, and every tile came back as a "carto.com/basemaps/apikey" notice. Any new page must use the same public browser key as `live.html` (`TILE_DARK`/`TILE_LIGHT`). CARTO is blocked from the cloud sandbox, so this can't be seen in local screenshots (tiles are aborted there).
+
 ### Text messages (09-26, his request)
 - He asked whether alerts must go through GitHub. He tested his carrier's email-to-text address from his own email and the text arrived (09-26). So every pushed alert (emergency squawks, pushed low passes, within-sight alerts) is also emailed to that address as one plain line (no emoji, ≤160 characters). GitHub stays the written record.
 - Sent through an email account used **only for this** (suggested: a new Gmail with an app password), not his personal one. Settings in `/var/lib/iad-map/text.json`, mode 600, owned by `iadmap`, written only by `sudo -u iadmap python3 /opt/iad-map/alerts.py --setup-text` (password typed on the Pi, never in the repo or a chat). No restart needed after setup; `alerts.py --test` also sends a test text. Failed texts retry every minute; without `text.json` nothing is texted.

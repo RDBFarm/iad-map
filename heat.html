@@ -102,7 +102,9 @@ if (/flights\.html/.test(document.referrer)) document.getElementById('back').hre
 const DATA_BASE = (new URLSearchParams(location.search).get('data') ||
   'https://raw.githubusercontent.com/RDBFarm/iad-map/live-data/').replace(/\/?$/, '/');
 const map = L.map('map', {center: [38.9444, -77.4558], zoom: 9, maxZoom: 13, preferCanvas: true});
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+// CARTO serves its basemaps only with a key: the same public browser key as
+// live.html (without it every tile is a "carto.com/basemaps/apikey" notice).
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=cb1_2vf8_1_82e754999cedcd91f5532f97', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
   subdomains: 'abcd', maxZoom: 19}).addTo(map);
 
