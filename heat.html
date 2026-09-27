@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>IAD Flight History</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; background:#0a0a14; color:#ccd; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; overflow:hidden; }
+  #hdr { position:absolute; top:0; left:0; right:0; z-index:1000; display:flex; align-items:center; gap:12px;
+    padding:10px 16px; background:rgba(10,10,20,0.92); border-bottom:1px solid rgba(255,255,255,0.08); }
+  #hdr h1 { font-size:1.05rem; color:#fff; white-space:nowrap; }
+  #hdr .sub { font-size:0.7rem; color:#8899bb; margin-top:2px; }
+  .btn { background:rgba(255,255,255,0.08); color:#dde; border:1px solid rgba(255,255,255,0.18); border-radius:6px;
+    padding:5px 10px; font-size:0.78rem; cursor:pointer; text-decoration:none; white-space:nowrap; }
+  #map { position:absolute; top:52px; left:0; right:0; bottom:0; background:#0a0a14; }
+  .panel { position:absolute; z-index:1000; background:rgba(10,10,20,0.9); border:1px solid rgba(255,255,255,0.1);
+    border-radius:10px; padding:10px 14px; font-size:0.72rem; color:#ccd; line-height:1.5; }
+  #legend { right:14px; bottom:26px; width:min(300px, calc(100% - 28px)); }
+  #legend h3 { font-size:0.78rem; color:#fff; margin-bottom:6px; cursor:pointer; }
+  #legend h3::after { content:" ▾"; color:#889; }
+  #legend.folded h3::after { content:" ▸"; }
+  #legend.folded .fold { display:none; }
+  #ramp { height:12px; border-radius:3px; margin:4px 0 2px; }
+  #ramp-lbl { display:flex; justify-content:space-between; color:#99a; font-size:0.66rem; }
+  #legend .note { color:#8899bb; margin-top:6px; }
+  #legend input[type=range] { width:100%; }
+  #status { left:14px; bottom:26px; max-width:calc(100% - 340px); color:#aab; }
+  @media (max-width: 640px) {
+    #hdr { gap:8px; padding:8px 10px; }
+    #hdr .sub { display:none; }
+    #hdr h1 { font-size:0.9rem; }
+    .btn { padding:4px 8px; font-size:0.72rem; }
+    #status { bottom:auto; top:62px; left:54px; max-width:calc(100% - 68px); font-size:0.66rem; padding:6px 10px; }
+  }
+</style>
+</head>
+<body>
+<div id="hdr">
+  <div>
+    <h1>🔥 IAD Flight History</h1>
+    <div class="sub">Every path the live map has shown, added up · <span id="covered">loading…</span></div>
+  </div>
+  <span style="margin-left:auto"></span>
+  <a class="btn" id="back" href="live.html">✈ Live map</a>
+</div>
+<div id="map"></div>
+<div class="panel" id="legend">
+  <h3 onclick="document.getElementById('legend').classList.toggle('folded')">Traffic, weighted by size</h3>
+  <div id="ramp"></div>
+  <div id="ramp-lbl"><span id="lbl-lo">1</span><span id="lbl-mid"></span><span id="lbl-hi">—</span></div>
+  <div class="note fold">A small plane counts 1, an airliner or business jet 10: 100 private planes glow like 10 airliners.
+    Each aircraft counts once per cell it crosses (cells ~110 m), so busy routes get brighter, not wider.
+    Log scale. Same traffic as the live map: within 50 mi of Dulles, below 15,000 ft, take-offs left out.</div>
+  <div class="note fold">Contrast <input type="range" id="gamma" min="30" max="200" value="100" aria-label="Contrast"></div>
+</div>
+<div class="panel" id="status">Loading the heat map…</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// The history heat map, built on the Pi by pi/heatmap.py (see its docstring)
+// and published once a day as heat.png (8-bit, log-scaled weight per cell)
+// with heat.json (bounds, the largest weight, hours covered). Colours: viridis,
+// as on the live map (colourblind-friendly), dim purple for little traffic
+// to bright yellow for the most; empty cells are transparent.
+// back to whichever live page linked here (flights.html is the one without the farm)
+if (/flights\.html/.test(document.referrer)) document.getElementById('back').href = 'flights.html';
+const DATA_BASE = (new URLSearchParams(location.search).get('data') ||
+  'https://raw.githubusercontent.com/RDBFarm/iad-map/live-data/').replace(/\/?$/, '/');
+const map = L.map('map', {center: [38.9444, -77.4558], zoom: 9, maxZoom: 13, preferCanvas: true});
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd', maxZoom: 19}).addTo(map);
+
+const VIRIDIS = [[68,1,84],[72,40,120],[62,74,137],[49,104,142],[38,130,142],[31,158,137],[53,183,121],[109,205,89],[180,222,44],[253,231,37]];
+function viridis(t) {
+  const x = Math.max(0, Math.min(1, t)) * (VIRIDIS.length - 1), i = Math.min(VIRIDIS.length - 2, Math.floor(x)), f = x - i;
+  return VIRIDIS[i].map((c, k) => Math.round(c + (VIRIDIS[i + 1][k] - c) * f));
+}
+document.getElementById('ramp').style.background =
+  'linear-gradient(to right,' + Array.from({length: 11}, (_, i) => `rgb(${viridis(i / 10).join(',')})`).join(',') + ')';
+
+let GREY = null, META = null, overlay = null;
+const FMT = new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric'});
+function paint() {
+  if (!GREY) return;
+  const g = +document.getElementById('gamma').value / 100;
+  const {rows, cols} = META;
+  const cv = document.createElement('canvas');
+  cv.width = cols; cv.height = rows;
+  const ctx = cv.getContext('2d'), img = ctx.createImageData(cols, rows), out = img.data;
+  const lut = new Uint8ClampedArray(256 * 4);
+  for (let q = 1; q < 256; q++) {
+    const t = Math.pow(q / 255, g), [r, gg, b] = viridis(t);
+    lut.set([r, gg, b, Math.round(90 + 165 * Math.min(1, t * 1.4))], q * 4);
+  }
+  for (let i = 0, n = rows * cols; i < n; i++) {
+    const q = GREY[i * 4];
+    if (q) out.set(lut.subarray(q * 4, q * 4 + 4), i * 4);
+  }
+  ctx.putImageData(img, 0, 0);
+  const url = cv.toDataURL();
+  if (overlay) overlay.setUrl(url);
+  else overlay = L.imageOverlay(url, META.bounds, {opacity: 1, interactive: false}).addTo(map);
+  // weight at the middle of the ramp: back through the log scale and the contrast
+  const w = t => Math.expm1(Math.pow(t, 1 / g) * Math.log1p(META.max_weight));
+  document.getElementById('lbl-mid').textContent = '≈' + Math.round(w(0.5)).toLocaleString();
+  document.getElementById('lbl-hi').textContent = Math.round(META.max_weight).toLocaleString();
+}
+document.getElementById('gamma').addEventListener('input', paint);
+// on a phone the explanation starts folded; tap the title to open it
+if (window.innerWidth <= 640) document.getElementById('legend').classList.add('folded');
+
+async function load() {
+  const status = document.getElementById('status');
+  try {
+    const r = await fetch(DATA_BASE + 'heat.json?t=' + Date.now());
+    if (!r.ok) throw new Error(r.status === 404 ? 'not built yet: the Pi writes it once a day' : 'HTTP ' + r.status);
+    META = await r.json();
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = DATA_BASE + 'heat.png?b=' + META.built;
+    await img.decode();
+    const cv = document.createElement('canvas');
+    cv.width = META.cols; cv.height = META.rows;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    GREY = ctx.getImageData(0, 0, META.cols, META.rows).data;
+    paint();
+    const from = META.first_hour ? FMT.format(new Date(META.first_hour * 1000)) : '?';
+    const to = META.last_hour ? FMT.format(new Date((META.last_hour + 3600) * 1000)) : '?';
+    document.getElementById('covered').textContent = from + ' – ' + to + ' · ' + META.hours.toLocaleString() + ' hours';
+    status.textContent = META.aircraft_hours.toLocaleString() + ' aircraft-hours, ' + from + ' – ' + to +
+      '. Rebuilt once a day, last ' + FMT.format(new Date(META.built * 1000)) + '.';
+  } catch (e) {
+    status.textContent = 'No heat map yet (' + e.message + ').';
+  }
+}
+load();
+</script>
+</body>
+</html>
