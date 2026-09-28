@@ -31,6 +31,9 @@
   .ramp-lbl { display:flex; justify-content:space-between; color:#99a; font-size:0.66rem; }
   .ramp-name { color:#dde; margin-top:4px; }
   #colour-row { display:flex; gap:6px; margin:4px 0 6px; }
+  #mov-row { display:flex; gap:6px; margin:8px 0 2px; }
+  #mov-row .btn { flex:1; padding:4px 0; text-align:center; }
+  #mov-row .btn:disabled { opacity:0.35; cursor:default; }
   #colour-row .btn { flex:1; padding:3px 0; text-align:center; }
   .switch { display:flex; align-items:center; gap:8px; margin:6px 0 2px; cursor:pointer; user-select:none; -webkit-user-select:none; color:#dde; }
   .switch input { position:absolute; opacity:0; width:0; height:0; }
@@ -122,7 +125,8 @@
     <button class="about-close" aria-label="Close" onclick="document.getElementById('about').hidden = true">✕</button>
     <h2>How this map is made</h2>
     <p><b>Every path near Dulles, added up.</b> Within 50 miles of Dulles and below 15,000 ft. With take-offs off,
-      it is exactly the live map's traffic; <b>Include take-offs</b> adds the climbs the live map leaves out. It starts
+      <b>Arrivals</b> is exactly the live map's traffic; <b>Take-offs</b> shows the climbs the live map leaves out;
+      <b>Both</b> adds them together. It starts
       when the farm's receiver started logging and keeps growing; the Pi rebuilds it once a day.</p>
     <p><b>Brighter, not broader.</b> The map is a grid of cells about 110 m (360 ft) square. Each aircraft lights
       every cell its path crosses, once per pass (per hour), however slowly it flies or however many positions it
@@ -145,7 +149,9 @@
 <div class="panel" id="legend">
   <h3 onclick="document.getElementById('legend').classList.toggle('folded')">Traffic, weighted by size</h3>
   <div id="ramps"></div>
-  <label class="switch"><input type="checkbox" id="takeoffs"><span class="track"></span>Include take-offs</label>
+  <div id="mov-row" role="group" aria-label="Arrivals or take-offs">
+    <button class="btn on" data-mov="a">Arrivals</button><button class="btn" data-mov="d">Take-offs</button><button class="btn" data-mov="ad">Both</button>
+  </div>
   <div class="fold">
     <div id="colour-row"><button class="btn on" id="c-size">Colour by size</button><button class="btn" id="c-single">Single colour</button></div>
     <div class="note">Contrast <input type="range" id="gamma" min="30" max="200" value="100" aria-label="Contrast"></div>
@@ -299,7 +305,13 @@ function setColour(c) {
   document.getElementById('c-single').classList.toggle('on', COLOUR === 'single');
   paint();
 }
-document.getElementById('takeoffs').addEventListener('change', () => show());
+// Arrivals (the live map's traffic), take-offs, or both
+let MOV = 'a';
+document.querySelectorAll('#mov-row .btn').forEach(bt => bt.onclick = () => {
+  MOV = bt.dataset.mov;
+  document.querySelectorAll('#mov-row .btn').forEach(x => x.classList.toggle('on', x === bt));
+  show();
+});
 document.addEventListener('keydown', e => { if (e.key === 'Escape') document.getElementById('about').hidden = true; });
 
 // ── Wind and airport selection ─────────────────────────────────────────────
@@ -317,7 +329,7 @@ const AIRPORTS = [[0, 'KIAD', 'Dulles'], [1, 'KDCA', 'Reagan Natl'], [2, 'KBWI',
   [9, 'KNYG', 'Quantico MCAF'], [7, 'en route', 'high altitude']];
 const activeAP = new Set(AIRPORTS.map(a => a[0]));
 function selectedKeys() {
-  const winds = selectedWindKeys(), movs = V2 && document.getElementById('takeoffs').checked ? ['a', 'd'] : ['a'];
+  const winds = selectedWindKeys(), movs = V2 ? MOV.split('') : ['a'];
   // older heat maps have no airport split: then the full map shows whatever is selected
   const scopes = activeAP.size === AIRPORTS.length || !airportsAvailable() ? ['all'] : [...activeAP];
   const out = [];
@@ -462,7 +474,7 @@ async function load() {
       // the Pi is still rebuilding for the colours and take-offs: single colour, arrivals only
       document.getElementById('rebuild').hidden = false;
       document.getElementById('rebuild').textContent = 'Colours by size and take-offs appear once the Pi finishes rebuilding (about an hour after its update).';
-      document.getElementById('takeoffs').disabled = true;
+      document.querySelectorAll('#mov-row .btn').forEach(bt => { bt.disabled = bt.dataset.mov !== 'a'; });
       setColour('single');
     }
     const from = META.first_hour ? FMT.format(new Date(META.first_hour * 1000)) : '?';
