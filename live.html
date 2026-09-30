@@ -1618,13 +1618,21 @@ async function operatorFor(flight) {
   }
   return OPERATORS[m[1]] || null;
 }
+// A callsign links to the flight on FlightAware (route, origin and destination,
+// history). It uses the same ICAO callsigns the receiver hears (JBU1055) and
+// N-numbers. Only plain letters and digits are linked: callsigns come off the air.
+function callsignLink(flight) {
+  const f = String(flight || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{2,8}$/.test(f)) return '';
+  return `<a href="https://www.flightaware.com/live/flight/${encodeURIComponent(f)}" target="_blank" rel="noopener" title="Route and details on FlightAware">${esc(f)} ↗</a>`;
+}
 function aircraftBlock(x, t, heading) {
   const call = x.flight || '(no callsign)';
   const day = new Date(t * 1000).toISOString().slice(0, 10);
   const hex = (x.hex || '').replace('~', '');
   return `<div><h5>${esc(heading || call)}</h5>` +
     notableRows(hex) +
-    (heading ? row('Callsign', esc(call)) : '') +
+    (heading ? row('Callsign', callsignLink(x.flight) || esc(call)) : '') +
     (x.operator ? row('Airline / operator', esc(x.operator) + (x.operator_radio ? '<br>radio callsign ' + esc(x.operator_radio) : '')) : '') +
     row('Registration', x.reg ? esc(x.reg) : !(x.hex || '').startsWith('~') && nNumber(hex)
       ? esc(nNumber(hex)) + '<br>worked out from its address'
