@@ -15,6 +15,7 @@
     padding:10px 16px; background:rgba(10,10,20,0.92); border-bottom:1px solid rgba(255,255,255,0.08); }
   #hdr h1 { font-size:1.05rem; color:#fff; white-space:nowrap; }
   #hdr .sub { font-size:0.7rem; color:#8899bb; margin-top:2px; }
+  .ico-hist { vertical-align:-0.15em; }   /* history: a clock running backwards */
   .btn { background:rgba(255,255,255,0.08); color:#dde; border:1px solid rgba(255,255,255,0.18); border-radius:6px;
     padding:5px 10px; font-size:0.78rem; cursor:pointer; text-decoration:none; white-space:nowrap; font-family:inherit; }
   .btn.on { background:rgba(253,231,37,0.18); border-color:rgba(253,231,37,0.6); color:#fff; }
@@ -88,7 +89,7 @@
 <body>
 <div id="hdr">
   <div>
-    <h1>🔥 IAD Flight History</h1>
+    <h1><svg class="ico-hist" viewBox="0 0 24 24" width="1.05em" height="1.05em" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12A8 8 0 1 1 7.3 17.7"/><path d="M3 10l2 2 2-2"/><path d="M13 8v4l3 2"/></svg> IAD Flight History</h1>
     <div class="sub">Every path near Dulles, added up · <span id="covered">loading…</span></div>
   </div>
   <span style="margin-left:auto"></span>

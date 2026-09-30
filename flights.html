@@ -61,6 +61,7 @@
   #btn-row { display:flex; align-items:center; gap:10px; }
   a.btn { text-decoration:none; display:inline-block; }
   #hdr .btn.on { background:rgba(64,180,255,0.35); color:#fff; }
+  .ico-hist { vertical-align:-0.15em; }   /* history: a clock running backwards */
   .btn {
     background:rgba(64,180,255,0.12); border:1px solid rgba(64,180,255,0.3);
     color:#40b4ff; padding:5px 14px; border-radius:6px; font-size:0.78rem;
@@ -264,7 +265,7 @@
   <span class="badge" id="badge-pos">— positions</span>
   <span style="margin-left:auto"></span>
   
-  <a class="btn" id="btn-heat" href="heat.html" title="History heat map: every path so far, added up">🔥<span class="blbl"> History</span></a>
+  <a class="btn" id="btn-heat" href="heat.html" title="History heat map: every path so far, added up"><svg class="ico-hist" viewBox="0 0 24 24" width="1.05em" height="1.05em" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12A8 8 0 1 1 7.3 17.7"/><path d="M3 10l2 2 2-2"/><path d="M13 8v4l3 2"/></svg><span class="blbl"> History</span></a>
   <button class="btn" id="btn-radar" onclick="cycleRadar()" title="Weather radar at the time shown">🌧<span class="blbl"> Radar off</span></button>
   <button class="btn" id="btn-mapstyle" onclick="toggleMapStyle()" title="Night / day map">🌙<span class="blbl"> Night Map</span></button>
   <span class="badge" id="badge-ac">— aircraft</span>
