@@ -60,6 +60,7 @@
   }
   #btn-row { display:flex; align-items:center; gap:10px; }
   a.btn { text-decoration:none; display:inline-block; }
+  #hdr .btn.on { background:rgba(64,180,255,0.35); color:#fff; }
   .btn {
     background:rgba(64,180,255,0.12); border:1px solid rgba(64,180,255,0.3);
     color:#40b4ff; padding:5px 14px; border-radius:6px; font-size:0.78rem;
@@ -264,6 +265,7 @@
   <span style="margin-left:auto"></span>
   
   <a class="btn" id="btn-heat" href="heat.html" title="History heat map: every path so far, added up">🔥<span class="blbl"> History</span></a>
+  <button class="btn" id="btn-radar" onclick="cycleRadar()" title="Weather radar at the time shown">🌧<span class="blbl"> Radar off</span></button>
   <button class="btn" id="btn-mapstyle" onclick="toggleMapStyle()" title="Night / day map">🌙<span class="blbl"> Night Map</span></button>
   <span class="badge" id="badge-ac">— aircraft</span>
   <span class="badge">≤ 15,000 ft</span>
@@ -1179,6 +1181,50 @@ function redraw() {
   const pct = (_curMin/SPAN*100).toFixed(1)+'%';
   sl.style.background = 'linear-gradient(to right,#40b4ff 0%,#40b4ff '+pct+',#334 '+pct+',#334 100%)';
   updateWeather(edtMin);
+  updateRadar();
+}
+
+// ── Weather radar ─────────────────────────────────────────────────────────
+// NEXRAD base reflectivity from the Iowa Environmental Mesonet's archive
+// (WMS-T, a US composite every 5 minutes, near real time), for the moment the
+// slider shows: live at "Now", history when dragged back or on a past day.
+// One source for both (owner, 2026-09-30); RainViewer was not needed. The
+// time must carry seconds (…T19:30:00Z) or IEM answers with an empty image.
+// A grey version was tried and dropped: greying the weather service's colours
+// makes the faintest returns (pale cyan) the brightest, so fog and clutter
+// looked like heavy rain. A colourblind-friendly radar would need each tile
+// re-coloured by reflectivity.
+const RADAR_URL = 'https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0q-t.cgi';
+const RADAR_LAG_S = 10 * 60;      // the newest frame can be a few minutes behind
+let radarMode = 'off', radarLayer = null, radarKey = null;
+function radarTime() {
+  const t = Math.min(minToDate(_curMin).getTime() / 1000, Date.now() / 1000 - RADAR_LAG_S);
+  return new Date(Math.floor(t / 300) * 300 * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+function updateRadar() {
+  if (radarMode === 'off' || !META) return;
+  const key = radarTime();
+  if (key === radarKey) return;                 // same 5-minute frame: nothing to fetch
+  radarKey = key;
+  if (!radarLayer) {
+    radarLayer = L.tileLayer.wms(RADAR_URL, {layers: 'nexrad-n0q-wmst', format: 'image/png', transparent: true,
+      opacity: 0.6, time: key, attribution: 'Radar: <a href="https://mesonet.agron.iastate.edu/" target="_blank" rel="noopener">IEM</a> NEXRAD'}).addTo(map);
+  } else {
+    radarLayer.setParams({time: key});
+  }
+  document.getElementById('btn-radar').title = 'Radar at ' +
+    FMT_TIME.format(new Date(key)).replace(/^0/, '') + ' (IEM NEXRAD, every 5 min). Tap to turn off';
+}
+function cycleRadar() {
+  radarMode = radarMode === 'off' ? 'on' : 'off';
+  document.querySelector('#btn-radar .blbl').textContent = ' Radar ' + radarMode;
+  document.getElementById('btn-radar').classList.toggle('on', radarMode !== 'off');
+  if (radarMode === 'off') {
+    if (radarLayer) { map.removeLayer(radarLayer); radarLayer = null; }
+    radarKey = null;
+  } else {
+    updateRadar();
+  }
 }
 
 // ── Playback ──────────────────────────────────────────────────────────────
