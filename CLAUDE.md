@@ -266,8 +266,14 @@ See `README.md` for how to install. In short:
 - **Page:** the "Last 24 hours" label is a day picker. A day loads alone (its hour files fingerprint-checked), opens at its last recorded moment, headings read the date, "Now" returns to the rolling 24 h and frees the day. The Near-the-farm search works on the chosen day. `flights.html` gets it via `make_public.py`.
 - 30 days is my suggestion, not his decision; the Pi holds months. GitHub size ≈ 17 MB/day compressed, ~0.5 GB at 30 days: check Settings → repository size after the first week.
 
+### Weather radar (built 09-30, his request)
+- A 🌧 button on the live map (and flights.html) shows NEXRAD base reflectivity for the moment the slider shows: IEM's WMS-T archive (`n0q-t.cgi`, layer `nexrad-n0q-wmst`, US composite every 5 min, from 2011, near real time; capabilities list the time extent to 2026-12-31, presumably extended yearly). "Now" uses the frame 10 min back (newest can lag); dragging back or a past day shows that time; the layer only refetches when the 5-minute frame changes. Opacity 0.6, under the dots.
+- **The TIME parameter must include seconds** (`2026-09-29T19:45:00Z`): without them IEM returns an empty image for every time, which looked like three dry days across the eastern US.
+- RainViewer (from an earlier chat's plan) was not needed: IEM covers "now" too.
+- A grey (colourblind) mode was tried and removed: greying the NWS palette makes the faintest returns (pale cyan) the brightest, so night-time fog/clutter looked like heavy rain. A proper colourblind-friendly radar, and hiding the faintest returns, would need each tile re-coloured by reflectivity; offered, not built.
+- The cloud sandbox reached IEM and RainViewer only after he widened the environment's network access (09-30).
+
 ### Planned, not built
-- **Weather radar overlay** — historical mode via IEM WMS-T NEXRAD (round the slider's UTC time to 5 min); live mode via RainViewer current tiles. Both as transparent overlays behind the dots.
 - **Layering live tracks on the heat map** was the original idea; the live map is a separate page instead, and the historical map is frozen.
 
 ---
