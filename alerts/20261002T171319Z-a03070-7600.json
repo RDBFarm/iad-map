@@ -1,0 +1,23 @@
+{
+ "title": "\ud83d\udea8 7600 N111FJ F900 \u2014 radio failure",
+ "body": "@RDBFarm \u2014 heard by the farm receiver at 2026-10-02 17:13:19 UTC.\n\n- **Squawk:** 7600 (radio failure)\n- **ADS-B emergency status:** radio failure\n- **Flight:** N111FJ\n- **Aircraft:** registration N111FJ, type F900 (DASSAULT Falcon 900), ICAO A03070\n- **Position:** 39.1368, -77.3550 \u2014 5 nm from the farm, bearing 101\u00b0\n- **Altitude:** 23,000 ft; **speed** 405 kt; **track** 219\u00b0\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=a03070) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=a03070) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`. A squawk can be set by mistake and corrected within seconds; this confirms only that the code was seen on 3 reads in a row._",
+ "event": {
+  "t": 1790961199,
+  "utc": "2026-10-02 17:13:19",
+  "hex": "a03070",
+  "flight": "N111FJ",
+  "type": "F900",
+  "code": "7600",
+  "emergency": "nordo",
+  "squawk": "7600",
+  "lat": 39.13678,
+  "lon": -77.355035,
+  "alt": 23000,
+  "gs": 405.3,
+  "track": 218.99,
+  "mlat": 0,
+  "dist_nm": 4.9,
+  "bearing": 101.0,
+  "pushed": true
+ }
+}
