@@ -279,7 +279,7 @@
   <div class="gb" id="alt-ramp"></div>
   <div class="gl"><span>Ground</span><span>7,500 ft</span><span>15,000 ft</span></div>
   <div style="margin-top:6px;line-height:1.7;color:#556;font-size:0.67rem">
-    Viridis: brightest = lowest<br>Bigger dots = more traffic
+    Viridis: brightest = lowest<br>Bigger, brighter = more aircraft
   </div>
 </div>
 
@@ -986,28 +986,33 @@ const CanvasLayer = L.Layer.extend({
     const pts = getPtsInRange(lo, hi);
     if (!pts.length) return;
 
-    // Build density map: grid cell → count, for brightening overlapping paths
+    // Density: DIFFERENT aircraft per grid cell (owner, 2026-10-02: two planes
+    // looked like ten). It used to count positions, and at 2-second logging a
+    // single plane fills a cell with several, so every path hit the cap. Now
+    // brightness and size grow with the log of the number of aircraft:
+    // 1 dim and thin, 2, 5, 10, 20+ each visibly brighter and wider.
     const GRID = 3; // pixels per cell
-    const density = new Map();
+    const cellAc = new Map();
     const projected = pts.map(p => {
       const lp = map.latLngToContainerPoint([p[0], p[1]]);
-      const gx = Math.floor(lp.x / GRID);
-      const gy = Math.floor(lp.y / GRID);
-      const key = gx + ',' + gy;
-      density.set(key, (density.get(key) || 0) + 1);
+      const key = Math.floor(lp.x / GRID) + ',' + Math.floor(lp.y / GRID);
+      let set = cellAc.get(key);
+      if (!set) cellAc.set(key, set = new Set());
+      set.add(p[12] || p[5]);
       return {x: lp.x, y: lp.y, t: p[3], ap: p[4], key, orig: p};
     });
+    const DENSE = Math.log(20);   // 20 aircraft through a cell = full brightness
 
     // Draw each point colored by airport
     const range = hi - lo;
     for (const p of projected) {
       const age       = (hi - p.t) / range;
       const matched   = !searchActive || matchesSearch(p.orig);
-      const baseAlpha = Math.max(0.08, 1 - age * 0.85);
+      const d         = cellAc.get(p.key).size;
+      const level     = Math.min(1, Math.log(d) / DENSE);       // 0 for one aircraft … 1 for 20+
+      const baseAlpha = Math.max(0.06, 1 - age * 0.85) * (0.55 + 0.45 * level);
       const alpha     = matched ? baseAlpha : baseAlpha * 0.08;
-      const d         = density.get(p.key) || 1;
-      const extra     = Math.min(d - 1, 6);
-      const r         = matched ? (1 + extra * 0.5) * (searchActive ? 1.5 : 1) : 1;
+      const r         = matched ? (1 + 2.5 * level) * (searchActive ? 1.5 : 1) : 1;
       const rgb       = altColor(p.orig[8]);
 
       ctx.beginPath();
