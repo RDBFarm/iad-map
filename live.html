@@ -278,7 +278,7 @@
   <div class="gb" id="alt-ramp"></div>
   <div class="gl"><span>Ground</span><span>7,500 ft</span><span>15,000 ft</span></div>
   <div style="margin-top:6px;line-height:1.7;color:#556;font-size:0.67rem">
-    Viridis: brightest = lowest<br>Bigger, brighter = more aircraft
+    Viridis: brightest = lowest<br>Brighter = more aircraft · thicker = bigger plane
   </div>
 </div>
 
@@ -614,14 +614,14 @@ function doSearch(query) {
 // From pi/aircraft_types.json (ICAO names via tar1090-db), loaded once from
 // this site. A name matches at the start of any word, so "hawk" finds
 // Black Hawk but "ual" doesn't match inside a word.
-let TYPE_NAMES = {}, TYPE_DESC = {};
+let TYPE_NAMES = {}, TYPE_DESC = {}, TYPE_WTC = {};
 const TYPE_ALIASES = {        // common names that aren't in the ICAO list
   'V-TAIL': ['BE35'], 'VTAIL': ['BE35'], 'V TAIL': ['BE35'], 'V35': ['BE35'], 'V-35': ['BE35'],
 };
 fetch('pi/aircraft_types.json').then(r => r.ok ? r.json() : null)
   .then(d => {
     if (!d) return;
-    TYPE_NAMES = d.names || {}; TYPE_DESC = d.types || {};
+    TYPE_NAMES = d.names || {}; TYPE_DESC = d.types || {}; TYPE_WTC = d.wtc || {};
     ACS.forEach(a => { a[4] = categoryOf(a[0] === String(a[3]).toUpperCase() ? '' : a[0], a[1], a[3]); });
     drawCategories(); if (PTS) redraw(); if (LAST_EVENTS) drawEvents(LAST_EVENTS);
   }).catch(() => {});
@@ -961,6 +961,14 @@ var AP_COLORS = {
 // ── Canvas overlay layer ──────────────────────────────────────────────────
 // loadData() assembles points sorted by time, so we can binary-search efficiently
 
+// Line thickness follows the size of the plane (owner, 2026-10-03, as on the
+// history map): ICAO wake-turbulence class from pi/aircraft_types.json "wtc".
+// Light (private planes, most helicopters) 1; medium (airliners, regional and
+// business jets) 1.7; heavy and super (widebodies) 2.4. Unknown types count as
+// light, as on the history map.
+const SIZE_FACTOR = {L: 1, M: 1.7, H: 2.4, J: 2.4};
+const sizeFactor = type => SIZE_FACTOR[TYPE_WTC[type]] || 1;
+
 const CanvasLayer = L.Layer.extend({
   onAdd(map) {
     this._map = map;
@@ -1025,7 +1033,7 @@ const CanvasLayer = L.Layer.extend({
       const level     = Math.min(1, Math.log(d) / DENSE);       // 0 for one aircraft … 1 for 20+
       const baseAlpha = Math.max(0.06, 1 - age * 0.85) * (0.55 + 0.45 * level);
       const alpha     = matched ? baseAlpha : baseAlpha * 0.08;
-      const r         = matched ? (1 + 2.5 * level) * (searchActive ? 1.5 : 1) : 1;
+      const r         = matched ? sizeFactor(p.orig[6]) * (1 + 1.5 * level) * (searchActive ? 1.5 : 1) : 1;
       const rgb       = altColor(p.orig[8]);
 
       ctx.beginPath();
