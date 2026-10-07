@@ -619,8 +619,14 @@ fetch('pi/aircraft_types.json').then(r => r.ok ? r.json() : null)
 //   aircraft tar1090-db lists there are flagged military). Foreign military
 //   isn't recognised.
 // Helicopter: ICAO type descriptor starts with H.
-// Experimental: a kit-built type, matched by its builder's name. Kit planes
-//   whose type isn't reported, or is filed as another model, are missed.
+// Experimental (owner, 2026-10-07: pre-production, not kit-builds): a type
+//   that only exists as a prototype or research aircraft (X-planes, Boom XB-1,
+//   Joby's JAS-4, the Scaled Composites research aircraft), from the ICAO type
+//   list. ADS-B has no "pre-production" flag, so this is by type and will
+//   usually be empty. Types that merely haven't been delivered yet are left
+//   out on purpose: their status changes (the 737 MAX 7 was expected in
+//   certification and turned up flying for United). Kit-builds count as
+//   Private. Checked first, so a military X-plane counts as experimental.
 // Commercial: an airline-style callsign (three letters and a number) on
 //   anything but a piston plane, so charter jets count and flight schools
 //   flying Cessnas and Pipers under a company callsign don't.
@@ -632,19 +638,18 @@ const CATEGORIES = [
 const activeCat = new Set(CATEGORIES.map(c => c[0]));
 const FIGHTER_TYPES = new Set(['F4', 'F5', 'F14', 'F15', 'F16', 'F16X', 'F18H', 'F18S', 'F22', 'F35',
   'F104', 'F111', 'F117', 'A10', 'T38', 'EUFI', 'RFAL', 'TOR', 'HAWK']);
-const KIT_BUILDERS = /^(VANS|SONEX|LANCAIR|GLASAIR|STODDARD-HAMILTON|KITFOX|SKYSTAR|ZENAIR|ZENITH|RANS|VELOCITY|RUTAN|QUICKIE|MURPHY|BEARHAWK|BUSHBY|KOLB|AVID|STEEN|THORP|JUST|TEAM|PROGRESSIVE AERODYNE|EUROPA|COZY|SEAREY)\b/;
-const KIT_EXTRA = new Set(['EAGL']);         // Christen Eagle (Christen also made the certified Husky)
-const NOT_KITS = new Set(['SS2', 'WHKN', 'WHK2', 'BOOM', 'ARES', 'BPOD', 'DEFI', 'VVIG']);  // Rutan one-offs
+const PROTOTYPE_TYPES = new Set(['X2', 'X3', 'X29', 'X32', 'X47B', 'X49', 'X55', 'X59', 'XB1', 'JAS4',
+  'SLCH', 'PRTS', 'GFLY']);
 function isMilitaryHex(hex) {
   const h = parseInt(hex, 16);
   return h >= 0xADF7C8 && h <= 0xAFFFFF;
 }
 function categoryOf(flight, type, hex) {
-  const desc = TYPE_DESC[type] || '', name = TYPE_NAMES[type] || '';
+  const desc = TYPE_DESC[type] || '';
+  if (PROTOTYPE_TYPES.has(type)) return 'experimental';
   if (FIGHTER_TYPES.has(type)) return 'fighter';
   if (isMilitaryHex(hex)) return 'military';
   if (desc[0] === 'H') return 'helicopter';
-  if (KIT_EXTRA.has(type) || (KIT_BUILDERS.test(name) && !NOT_KITS.has(type))) return 'experimental';
   if (/^[A-Z]{3}\d/.test(flight || '') && desc[2] !== 'P') return 'commercial';
   return 'private';
 }
