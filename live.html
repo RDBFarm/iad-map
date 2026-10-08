@@ -652,7 +652,8 @@ const activeCat = new Set(CATEGORIES.map(c => c[0]));
 const FIGHTER_TYPES = new Set(['F4', 'F5', 'F14', 'F15', 'F16', 'F16X', 'F18H', 'F18S', 'F22', 'F35',
   'F104', 'F111', 'F117', 'A10', 'T38', 'EUFI', 'RFAL', 'TOR', 'HAWK']);
 const PROTOTYPE_TYPES = new Set(['X2', 'X3', 'X29', 'X32', 'X47B', 'X49', 'X55', 'X59', 'XB1', 'JAS4',
-  'SLCH', 'PRTS', 'GFLY']);
+  'SLCH', 'PRTS', 'GFLY',
+  'B779']);   // Boeing 777-9: added at the owner's request (2026-10-08) while it is in flight test; remove it when deliveries start
 function isMilitaryHex(hex) {
   const h = parseInt(hex, 16);
   return h >= 0xADF7C8 && h <= 0xAFFFFF;
