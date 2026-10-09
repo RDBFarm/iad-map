@@ -1,0 +1,29 @@
+{
+ "title": "\ud83d\udc40 Air Force One (25-3300) within sight of the farm: look SE, about 12\u00b0 up, 12 mi away",
+ "body": "@RDBFarm \u2014 Air Force One (25-3300, Boeing VC-25B Bridge) came within sight range of the farm at 2026-10-09 21:53:24 UTC.\n\n- **Where to look:** SE (bearing 142\u00b0), about 12\u00b0 above the horizon\n- **Distance:** 11.7 miles in a straight line (11.5 miles across the ground)\n- **Height:** about 13,261 ft above the farm's ground, heading NW, 372 kt\n- **Callsign:** AF1; ICAO AF83F3\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=af83f3) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=af83f3) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`: within 12 miles. That range is an estimate of how far a big jet shows as a dot in clear air; cloud between the farm and the aircraft isn't known. Once per visit._",
+ "event": {
+  "kind": "sighting",
+  "t": 1791582804,
+  "utc": "2026-10-09 21:53:24",
+  "hex": "af83f3",
+  "flight": "AF1",
+  "type": "B748",
+  "name": "Air Force One",
+  "reg": "25-3300",
+  "type_name": "Boeing VC-25B Bridge",
+  "slant_mi": 11.7,
+  "horiz_mi": 11.5,
+  "bearing": 142,
+  "elev_deg": 12,
+  "agl": 13261,
+  "alt": 13300,
+  "gs": 372.1,
+  "track": 313.26,
+  "lat": 39.019946,
+  "lon": -77.329041,
+  "limit_mi": 12,
+  "visibility_mi": 10.0,
+  "mlat": 0,
+  "pushed": true
+ }
+}
