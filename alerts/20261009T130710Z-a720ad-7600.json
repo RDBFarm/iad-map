@@ -1,0 +1,21 @@
+{
+ "title": "\ud83d\udea8 7600 N55881 P28A \u2014 radio failure",
+ "body": "@RDBFarm \u2014 heard by the farm receiver at 2026-10-09 13:07:10 UTC.\n\n- **Squawk:** 7600 (radio failure)\n- **Flight:** N55881\n- **Aircraft:** registration N55881, type P28A (PIPER PA-28-140/150/160/180), ICAO A720AD\n- **Position:** not reported\n- **Altitude:** 1,900 ft; **speed** 120 kt; **track** 94\u00b0\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=a720ad) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=a720ad) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`. A squawk can be set by mistake and corrected within seconds; this confirms only that the code was seen on 3 reads in a row._",
+ "event": {
+  "t": 1791551230,
+  "utc": "2026-10-09 13:07:10",
+  "hex": "a720ad",
+  "flight": "N55881",
+  "type": "P28A",
+  "code": "7600",
+  "emergency": null,
+  "squawk": "7600",
+  "lat": null,
+  "lon": null,
+  "alt": 1900,
+  "gs": 120.3,
+  "track": 94.29,
+  "mlat": 0,
+  "pushed": true
+ }
+}
