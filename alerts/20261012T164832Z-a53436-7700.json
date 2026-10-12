@@ -1,0 +1,23 @@
+{
+ "title": "\ud83d\udea8 7700 RPA4647 (Republic Airlines) E75L \u2014 general emergency",
+ "body": "@RDBFarm \u2014 heard by the farm receiver at 2026-10-12 16:48:32 UTC.\n\n- **Squawk:** 7700 (general emergency)\n- **ADS-B emergency status:** general emergency\n- **Flight:** RPA4647 \u2014 Republic Airlines (radio callsign BRICKYARD)\n- **Aircraft:** registration N434YX, type E75L (EMBRAER ERJ-170-200 (long wing)), ICAO A53436\n- **Position:** 40.2938, -77.5732 \u2014 69 nm from the farm, bearing 356\u00b0\n- **Altitude:** 19,075 ft; **speed** 326 kt; **track** 176\u00b0\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=a53436) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=a53436) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`. A squawk can be set by mistake and corrected within seconds; this confirms only that the code was seen on 3 reads in a row._",
+ "event": {
+  "t": 1791823712,
+  "utc": "2026-10-12 16:48:32",
+  "hex": "a53436",
+  "flight": "RPA4647",
+  "type": "E75L",
+  "code": "7700",
+  "emergency": "general",
+  "squawk": "7700",
+  "lat": 40.293802,
+  "lon": -77.573152,
+  "alt": 19075,
+  "gs": 325.8,
+  "track": 175.95,
+  "mlat": 0,
+  "dist_nm": 68.7,
+  "bearing": 355.6,
+  "pushed": true
+ }
+}
