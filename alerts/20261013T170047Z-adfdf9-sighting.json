@@ -1,0 +1,29 @@
+{
+ "title": "\ud83d\udc40 Air Force One (92-9000) within sight of the farm: look SSE, about 13\u00b0 up, 12 mi away",
+ "body": "@RDBFarm \u2014 Air Force One (92-9000, Boeing VC25A) came within sight range of the farm at 2026-10-13 17:00:47 UTC.\n\n- **Where to look:** SSE (bearing 152\u00b0), about 13\u00b0 above the horizon\n- **Distance:** 11.8 miles in a straight line (11.5 miles across the ground)\n- **Height:** about 14,022 ft above the farm's ground, heading NW, 388 kt\n- **Callsign:** not broadcast; ICAO ADFDF9\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=adfdf9) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=adfdf9) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`: within 12 miles. That range is an estimate of how far a big jet shows as a dot in clear air; cloud between the farm and the aircraft isn't known. Once per visit._",
+ "event": {
+  "kind": "sighting",
+  "t": 1791910847,
+  "utc": "2026-10-13 17:00:47",
+  "hex": "adfdf9",
+  "flight": "",
+  "type": "B742",
+  "name": "Air Force One",
+  "reg": "92-9000",
+  "type_name": "Boeing VC25A",
+  "slant_mi": 11.8,
+  "horiz_mi": 11.5,
+  "bearing": 152,
+  "elev_deg": 13,
+  "agl": 14022,
+  "alt": 14250,
+  "gs": 387.5,
+  "track": 325.94,
+  "lat": 39.003932,
+  "lon": -77.359497,
+  "limit_mi": 12,
+  "visibility_mi": 10.0,
+  "mlat": 1,
+  "pushed": true
+ }
+}
