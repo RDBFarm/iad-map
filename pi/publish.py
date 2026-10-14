@@ -816,6 +816,38 @@ def heat_points_for_hour(hour):
     return out
 
 
+def wide_points_for_hour(hour):
+    """One hour of positions for the wide heat map (heatmap.update_wide):
+    every airborne position in its box, at every height, take-offs
+    included, as (t, hex, lat, lon, type), sorted by aircraft and then time
+    and yielded a row at a time: an hour over the whole box is ~300,000
+    positions, too many to hold at once on a 2 GB Pi. The sort is kept in
+    memory (temp_store), so nothing is written to the SD card. An aircraft's
+    repeats of its last position are skipped."""
+    if not os.path.exists(DB_PATH):
+        return
+    a = heatmap.WIDE
+    db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=60)
+    try:
+        db.execute("PRAGMA temp_store = MEMORY")
+        cur = db.execute("""
+            SELECT pos_t, hex, lat, lon, type, category FROM positions
+            WHERE t BETWEEN ? AND ? AND pos_t >= ? AND pos_t < ?
+              AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
+              AND on_ground = 0 AND alt_baro IS NOT NULL
+            ORDER BY hex, pos_t""",
+            (hour, hour + 3660, hour, hour + 3600, a.lat_min, a.lat_max, a.lon_min, a.lon_max))
+        last = None
+        for t, hexid, lat, lon, actype, category in cur:
+            t = int(t)
+            if (hexid, t) == last or category in GROUND_VEHICLE_CATEGORIES:
+                continue
+            last = (hexid, t)
+            yield (t, hexid, lat, lon, actype or aircraft_lookup.type_for(hexid) or "")
+    finally:
+        db.close()
+
+
 def log_start():
     """When the log begins (epoch), or None."""
     try:
@@ -841,6 +873,21 @@ def update_heat(index, final, now, wx=None):
                 index["heat"] = {"built": json.load(f).get("built")}
     except Exception as e:
         print("publish: heat map failed:", e, flush=True)
+
+
+def update_wide_heat(index, now):
+    """The wide heat map (heatmap.update_wide), after the near one and on its
+    own time limit. Never stops the map."""
+    try:
+        wrote = heatmap.update_wide(WORK_DIR, wide_points_for_hour, now,
+                                    os.path.join(os.path.dirname(DB_PATH), "heat-wide"), db_start=log_start())
+        if wrote:
+            print("publish: wide heat map rewritten", flush=True)
+        if os.path.exists(os.path.join(WORK_DIR, "heat-wide.json")):
+            with open(os.path.join(WORK_DIR, "heat-wide.json")) as f:
+                index["heat_wide"] = {"built": json.load(f).get("built")}
+    except Exception as e:
+        print("publish: wide heat map failed:", e, flush=True)
 
 
 def enrich(index):
@@ -883,6 +930,7 @@ def main():
     enrich(index)
     final = archive(index, files, final | (frozen - set(files)), index["meta"]["end"])
     update_heat(index, final, index["meta"]["end"], wx)
+    update_wide_heat(index, index["meta"]["end"])
     m = index["meta"]
     print(f"publish: {m['positions']} positions, {m['aircraft']} aircraft, "
           f"{m['mlat_positions']} MLAT positions, {m['aircraft_mlat_only']} aircraft seen only by MLAT, "
