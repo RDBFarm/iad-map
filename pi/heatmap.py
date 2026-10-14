@@ -46,6 +46,17 @@ How it is built:
 Images: heat/v2/<scope>/<wind>/<a|d>.png, RGB, one pixel per cell, north up:
 red = small aircraft, green = big aircraft (blue unused), each
 round(255 * ln(1 + w) / ln(1 + max)) with its max in heat.json.
+
+The wide map (update_wide; owner, 2026-10-13: "a much larger area and
+include higher altitudes"): the same lines and weights over everything the
+receiver hears, every height, in a box 200 miles each way from Dulles (98% of
+the receiver's aircraft-time is within 200 miles, 99.9% within 230; every
+aircraft heard Oct 7-14, the farthest 275 miles), with cells
+about 445 m square so the image has as many pixels as the near one. No wind,
+airport or take-off split: one grid per size, one image,
+heat/wide/all.png, with heat-wide.json. Its sums live in their own folder
+and its rebuild runs under its own time limit, so it never holds up the
+near map or the live map.
 """
 import itertools, json, math, mmap, os, shutil, struct, time, zlib
 
@@ -55,8 +66,6 @@ LAT_MIN, LAT_MAX = 38.215, 39.675
 LON_MIN, LON_MAX = -78.392, -76.520
 DLAT = 0.001            # ~111 m
 DLON = 0.00128          # ~111 m at this latitude
-ROWS = round((LAT_MAX - LAT_MIN) / DLAT)
-COLS = round((LON_MAX - LON_MIN) / DLON)
 WEIGHT = {"L": 1.0, "M": 10.0, "H": 10.0, "J": 10.0}
 UNKNOWN_WEIGHT = 1.0
 MAX_GAP_S = 30            # a longer silence breaks the line (no drawing across it)
@@ -81,22 +90,68 @@ def weight(actype, _wtc={}):
     return WEIGHT.get(_wtc.get(actype or ""), UNKNOWN_WEIGHT)
 
 
-def cell(lat, lon):
+class Area:
+    """A grid of cells over a lat/lon box; row 0 is the north edge."""
+    def __init__(self, lat_min, lat_max, lon_min, lon_max, dlat, dlon):
+        self.lat_min, self.lat_max, self.lon_min, self.lon_max = lat_min, lat_max, lon_min, lon_max
+        self.dlat, self.dlon = dlat, dlon
+        self.rows = round((lat_max - lat_min) / dlat)
+        self.cols = round((lon_max - lon_min) / dlon)
+
+    def bounds(self):
+        return [[self.lat_min, self.lon_min], [self.lat_max, self.lon_max]]
+
+
+NEAR = Area(LAT_MIN, LAT_MAX, LON_MIN, LON_MAX, DLAT, DLON)
+# The wide map: 200 statute miles (173.8 nm) north, south, east and west of
+# Dulles (38.9444, -77.4558); cells ~445 m, four times the near map's.
+WIDE = Area(36.044, 41.844, -81.180, -73.731, 0.004, 0.00512)
+WIDE_VERSION = 1
+WIDE_BUDGET_S = 120       # at most this long adding hours per run (the Pi is a 4B)
+
+
+def cell(lat, lon, area=NEAR):
     """Fractional (row, col) of a position; row 0 is the north edge."""
-    return (LAT_MAX - lat) / DLAT, (lon - LON_MIN) / DLON
+    return (area.lat_max - lat) / area.dlat, (lon - area.lon_min) / area.dlon
 
 
-def line_cells(a, b):
+def line_cells(a, b, area=NEAR):
     """Cells a straight segment passes through (sampled at least twice per cell)."""
-    (r1, c1), (r2, c2) = cell(*a), cell(*b)
+    (r1, c1), (r2, c2) = cell(*a, area), cell(*b, area)
     n = max(1, int(math.ceil(2 * max(abs(r2 - r1), abs(c2 - c1)))))
+    rows, cols = area.rows, area.cols
     out = set()
     for i in range(n + 1):
         f = i / n
         r, c = int(r1 + (r2 - r1) * f), int(c1 + (c2 - c1) * f)
-        if 0 <= r < ROWS and 0 <= c < COLS:
-            out.add(r * COLS + c)
+        if 0 <= r < rows and 0 <= c < cols:
+            out.add(r * cols + c)
     return out
+
+
+def path_cells(pts, area=NEAR):
+    """One aircraft's positions (t, lat, lon, type, tag), in time order ->
+    ({cell: tag of the position that first reached it}, type). The path is
+    drawn as straight segments between positions at most MAX_GAP_S apart."""
+    cells, prev, actype = {}, None, ""
+    for t, lat, lon, ty, tag in pts:
+        actype = ty or actype
+        seg = line_cells((prev[1], prev[2]) if prev and t - prev[0] <= MAX_GAP_S else (lat, lon), (lat, lon), area)
+        for k in seg:
+            cells.setdefault(k, tag)
+        prev = (t, lat, lon)
+    return cells, actype
+
+
+def aircraft_cells(points, area=NEAR):
+    """points: (t, hex, lat, lon, type, tag) in any order -> path_cells()
+    for each aircraft."""
+    by_hex = {}
+    for t, hexid, lat, lon, actype, tag in points:
+        by_hex.setdefault(hexid, []).append((t, lat, lon, actype, tag))
+    for pts in by_hex.values():
+        pts.sort()
+        yield path_cells(pts, area)
 
 
 def hour_cells(points):
@@ -105,25 +160,32 @@ def hour_cells(points):
     weight once to every cell its path crosses; the cell goes to the zone and
     movement of the position that first reached it, the class to the
     aircraft's size, so all the parts add up to the total."""
-    by_hex = {}
-    for t, hexid, lat, lon, actype, zone, mov in points:
-        by_hex.setdefault(hexid, []).append((t, lat, lon, actype, zone, mov))
-    out = {}
-    for pts in by_hex.values():
-        pts.sort()
-        cells, prev, actype = {}, None, ""
-        for t, lat, lon, ty, zone, mov in pts:
-            actype = ty or actype
-            seg = line_cells((prev[1], prev[2]) if prev and t - prev[0] <= MAX_GAP_S else (lat, lon), (lat, lon))
-            for k in seg:
-                cells.setdefault(k, (zone, mov))
-            prev = (t, lat, lon)
+    out, n = {}, 0
+    for cells, actype in aircraft_cells((t, h, lat, lon, ty, (zone, mov))
+                                        for t, h, lat, lon, ty, zone, mov in points):
+        n += 1
         w = weight(actype)
         size = "b" if w > 1 else "s"
         for k, (zone, mov) in cells.items():
             d = out.setdefault((zone, mov + size), {})
             d[k] = d.get(k, 0.0) + w
-    return out, len(by_hex)
+    return out, n
+
+
+def wide_hour_cells(points):
+    """points: (t, hex, lat, lon, type) for one hour, sorted by aircraft and
+    then time, so they can be read a row at a time (about 160 aircraft are in
+    the box at once, ~300,000 positions an hour) -> ({'s'|'b': {cell:
+    weight}}, aircraft), on the wide grid, the same rules as hour_cells."""
+    out, n = {}, 0
+    for _, rows in itertools.groupby(points, key=lambda p: p[1]):
+        cells, actype = path_cells(((t, lat, lon, ty, None) for t, _, lat, lon, ty in rows), WIDE)
+        n += 1
+        w = weight(actype)
+        d = out.setdefault("b" if w > 1 else "s", {})
+        for k in cells:
+            d[k] = d.get(k, 0.0) + w
+    return out, n
 
 
 def wind_key(wind):
@@ -180,9 +242,9 @@ def log_bytes(acc):
 
 class Grid:
     """A float32 grid file, edited in place (memory-mapped)."""
-    def __init__(self, path):
+    def __init__(self, path, area=NEAR):
         self.path = path
-        size = 4 * ROWS * COLS
+        size = 4 * area.rows * area.cols
         if not os.path.exists(path) or os.path.getsize(path) != size:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "wb") as f:
@@ -203,12 +265,34 @@ class Grid:
         self.f.close()
 
 
-def add_to(path, cells):
-    g = Grid(path)
+def add_to(path, cells, area=NEAR):
+    g = Grid(path, area)
     try:
         g.add(cells)
     finally:
         g.close()
+
+
+def write_image(out, paths, area=NEAR):
+    """The RGB image of two grids (red the first, green the second; a
+    missing grid is empty). Returns each one's largest weight."""
+    chans, tops = [], []
+    for path in paths:
+        if os.path.exists(path):
+            g = Grid(path, area)
+            b, top = log_bytes(g.acc)
+            g.close()
+        else:
+            b, top = bytearray(area.rows * area.cols), 0.0
+        chans.append(b)
+        tops.append(round(top, 1))
+    rgb = bytearray(3 * area.rows * area.cols)
+    rgb[0::3], rgb[1::3] = chans
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out + ".tmp", "wb") as f:
+        f.write(png(area.rows, area.cols, rgb, 3))
+    os.replace(out + ".tmp", out)
+    return tops
 
 
 class State:
@@ -319,29 +403,13 @@ def update(work_dir, db_hours, now, state_dir, db_start=None, wx=None, wx_fetch=
             shutil.rmtree(os.path.join(work_dir, "heat"))
     for img in st.s["dirty"]:
         scope, wk, mov = img.split("/")
-        chans, tops = [], []
-        for size in "sb":
-            path = st.grid(scope, wk, mov + size)
-            if os.path.exists(path):
-                g = Grid(path)
-                b, top = log_bytes(g.acc)
-                g.close()
-            else:
-                b, top = bytearray(ROWS * COLS), 0.0
-            chans.append(b)
-            tops.append(round(top, 1))
-        rgb = bytearray(3 * ROWS * COLS)
-        rgb[0::3], rgb[1::3] = chans
-        out = os.path.join(work_dir, "heat", "v2", scope, wk, mov + ".png")
-        os.makedirs(os.path.dirname(out), exist_ok=True)
-        with open(out + ".tmp", "wb") as f:
-            f.write(png(ROWS, COLS, rgb, 3))
-        os.replace(out + ".tmp", out)
+        tops = write_image(os.path.join(work_dir, "heat", "v2", scope, wk, mov + ".png"),
+                           [st.grid(scope, wk, mov + size) for size in "sb"])
         st.s["images"][img] = {"max": tops, "v": int(now)}
     st.s["dirty"] = []
     meta = {
         "version": VERSION,
-        "bounds": [[LAT_MIN, LON_MIN], [LAT_MAX, LON_MAX]], "rows": ROWS, "cols": COLS, "cell_m": 111,
+        "bounds": NEAR.bounds(), "rows": NEAR.rows, "cols": NEAR.cols, "cell_m": 111,
         "first_hour": min(st.done), "last_hour": max(st.done),
         "hours": len(st.done), "aircraft_hours": st.s["aircraft_hours"],
         "no_wind_hours": st.s["no_wind_hours"],
@@ -360,4 +428,83 @@ def update(work_dir, db_hours, now, state_dir, db_start=None, wx=None, wx_fetch=
     os.replace(meta_path + ".tmp", meta_path)
     st.s["published"] = int(now)
     st.save()
+    return True
+
+
+def update_wide(work_dir, db_hours, now, state_dir, db_start=None, force=False, budget_s=WIDE_BUDGET_S):
+    """The wide map: add settled hours of the log not added yet, oldest
+    first, for at most budget_s (and MAX_HOURS_PER_RUN hours) per call.
+    db_hours(hour) -> (t, hex, lat, lon, type), every airborne position in
+    the WIDE box. Writes heat/wide/all.png and heat-wide.json into work_dir
+    when nothing is left to add and a day has passed since the last time.
+    Returns True if it wrote them."""
+    os.makedirs(state_dir, exist_ok=True)
+    path = os.path.join(state_dir, "state.json")
+    try:
+        with open(path) as f:
+            s = json.load(f)
+    except (OSError, ValueError):
+        s = {}
+    if s.get("version") != WIDE_VERSION:
+        for name in ("s.f32", "b.f32"):
+            if os.path.exists(os.path.join(state_dir, name)):
+                os.remove(os.path.join(state_dir, name))
+        s = {"version": WIDE_VERSION}
+    for k, v in (("hours", []), ("aircraft_hours", 0), ("published", 0), ("dirty", False), ("max", [0, 0])):
+        s.setdefault(k, v)
+    done = set(s["hours"])
+
+    def save():
+        s["hours"] = sorted(done)
+        with open(path + ".tmp", "w") as f:
+            json.dump(s, f)
+        os.replace(path + ".tmp", path)
+
+    if db_start is None:
+        return False
+    last = int(now) - SETTLE_S - 3600
+    last -= last % 3600
+    todo = [h for h in range(db_start - db_start % 3600, last + 1, 3600) if h not in done]
+    started = time.monotonic()
+    for h in todo[:MAX_HOURS_PER_RUN]:
+        if time.monotonic() - started > budget_s:
+            break
+        parts, n = wide_hour_cells(db_hours(h))
+        for size, cells in parts.items():
+            add_to(os.path.join(state_dir, size + ".f32"), cells, WIDE)
+        s["aircraft_hours"] += n
+        s["dirty"] = True
+        done.add(h)
+        save()                                 # after each hour: a crash loses at most the hour in hand
+    meta_path = os.path.join(work_dir, "heat-wide.json")
+    try:
+        with open(meta_path) as f:
+            old_version = json.load(f).get("version")
+    except (OSError, ValueError):
+        old_version = None
+    due = force or old_version != WIDE_VERSION or now - s["published"] >= REPUBLISH_S
+    if any(h not in done for h in todo) or not due or not done:
+        return False
+    if s["dirty"] or not os.path.exists(os.path.join(work_dir, "heat", "wide", "all.png")):
+        s["max"] = write_image(os.path.join(work_dir, "heat", "wide", "all.png"),
+                               [os.path.join(state_dir, size + ".f32") for size in "sb"], WIDE)
+        s["v"] = int(now)
+    meta = {
+        "version": WIDE_VERSION,
+        "bounds": WIDE.bounds(), "rows": WIDE.rows, "cols": WIDE.cols, "cell_m": 445,
+        "first_hour": min(done), "last_hour": max(done),
+        "hours": len(done), "aircraft_hours": s["aircraft_hours"],
+        "images": {"all": {"max": s["max"], "v": s.get("v", int(now))}},
+        "weights": {"small": WEIGHT["L"], "big": WEIGHT["M"], "unknown": UNKNOWN_WEIGHT},
+        "note": "Image heat/wide/all.png: every airborne position the receiver logged, every height, "
+                "in a box 200 miles each way from Dulles. Red channel small aircraft, green big; "
+                "pixel = round(255 ln(1+w) / ln(1+max)), max per channel in images.all.max.",
+        "built": int(now),
+    }
+    with open(meta_path + ".tmp", "w") as f:
+        json.dump(meta, f, separators=(",", ":"))
+    os.replace(meta_path + ".tmp", meta_path)
+    s["published"] = int(now)
+    s["dirty"] = False
+    save()
     return True
