@@ -74,7 +74,12 @@
   .about-close { position:absolute; top:10px; right:12px; background:none; border:none; color:#aab; font-size:1.1rem; cursor:pointer; }
   /* Wide: everything the receiver hears; no wind, airport or take-off choices */
   body.wide #aps, body.wide #wind, body.wide #mov-row, body.wide #rebuild { display:none; }
-  body:not(.wide) #wide-info { display:none; }
+  body:not(.wide) #wide-info, body:not(.wide) .wide-only { display:none; }
+  .leaflet-tooltip.bc-label { background:none; border:none; box-shadow:none; color:#cfe3ff; font-size:0.62rem;
+    font-weight:600; padding:0 2px; text-shadow:0 0 3px #000, 0 0 3px #000; }
+  .leaflet-tooltip.bc-label::before { display:none; }
+  .bc-icon svg { display:block; }
+  .no-bc-labels .bc-label { display:none; }
   #wide-info { color:#fff; margin-top:4px; }
   .leaflet-tooltip.ap-label { background:rgba(255,255,255,0.85); color:#111; border:none; box-shadow:none;
     font-size:0.66rem; font-weight:600; padding:1px 4px; border-radius:3px; }
@@ -151,6 +156,10 @@
       445 m (a quarter mile) so the picture has as many dots as the near map. No wind, airport or take-off choices:
       they mean little for a jet crossing at 35,000 ft. Far out, the receiver only hears aircraft high enough to be
       above its horizon, so the outer part shows the high routes. The dashed circle is the near map's 50 miles.</p>
+    <p><b>Radio beacons</b> (the hexagons on the wide map; switch them off in the panel): the FAA's VOR, VOR/DME and
+      VORTAC stations. Published air routes are drawn from beacon to beacon, so tracks pinch together over them:
+      the bright knot north of State College is the Philipsburg beacon (PSB), where 18 routes meet. Tap one for its
+      name. Labels appear when you zoom in.</p>
     <p><b>Wind.</b> Each hour is filed under Dulles's wind at the time: the report nearest the middle of the hour,
       the direction the wind blows <b>from</b> (as weather reports give it), to 10°. Calm includes variable winds.
       The ticks around the dial show how many hours each direction has.</p>
@@ -167,12 +176,14 @@
     <div id="colour-row"><button class="btn on" id="c-size">Colour by size</button><button class="btn" id="c-single">Single colour</button></div>
     <div class="note">Contrast <input type="range" id="gamma" min="30" max="200" value="100" aria-label="Contrast"></div>
   </div>
+  <label class="switch wide-only"><input type="checkbox" id="bc-on" checked><span class="track"></span> Radio beacons (VORs)</label>
   <div id="wide-info"></div>
   <div class="note" id="rebuild" hidden></div>
   <div class="note" id="status">Loading the heat map…</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="beacons.js"></script>
 <script>
 // The history heat map, built on the Pi by pi/heatmap.py (see its docstring):
 // heat.png (all winds) and heat/<dir>.png, heat/calm.png (by KIAD's wind at
@@ -217,6 +228,32 @@ const nearAirports = L.layerGroup(), wideAirports = L.layerGroup();
 const ring50 = L.circle([38.9444, -77.4558], {radius: 80467, color: '#fff', weight: 1, opacity: 0.45, dashArray: '4 6',
   fill: false, interactive: false});
 const WIDE_BOUNDS = [[36.044, -81.180], [41.844, -73.731]];
+// Radio beacons on the wide map (beacons.js, from the FAA by tools/make_beacons.py): a hexagon, the
+// chart symbol for a VOR; labels only from zoom 8, where they no longer pile up. On/off is
+// remembered per browser. Their pane is above the airports' (650): that one is a canvas over the
+// whole map, and under it the beacons could not be tapped.
+map.createPane('beacons').style.zIndex = 660;
+const beaconLayer = L.layerGroup();
+const BC_ICON = L.divIcon({className: 'bc-icon', iconSize: [14, 14], iconAnchor: [7, 7],
+  html: '<svg width="14" height="14" viewBox="-7 -7 14 14" aria-hidden="true"><polygon points="-3,-5.2 3,-5.2 6,0 3,5.2 -3,5.2 -6,0" fill="rgba(10,10,20,0.6)" stroke="#cfe3ff" stroke-width="1.4"/><circle r="1.2" fill="#cfe3ff"/></svg>'});
+(typeof BEACONS === 'undefined' ? [] : BEACONS).forEach(([id, name, lat, lon, kind, high]) => {
+  L.marker([lat, lon], {pane: 'beacons', icon: BC_ICON, keyboard: false, title: id})
+    .bindTooltip(id, {pane: 'beacons', permanent: true, direction: 'right', offset: [5, 0], className: 'bc-label'})
+    .bindPopup(`<b>${id}</b> — ${name} ${kind}<br>Radio beacon${high ? ', on the high-altitude (jet) route charts' : ''}. ` +
+               'Air routes are drawn from beacon to beacon, so tracks pinch together over it.')
+    .addTo(beaconLayer);
+});
+let BEACONS_ON = true;
+try { BEACONS_ON = localStorage.getItem('heat.beacons') !== 'off'; } catch (e) {}
+document.getElementById('bc-on').checked = BEACONS_ON;
+const bcLabels = () => map.getContainer().classList.toggle('no-bc-labels', map.getZoom() < 8);
+map.on('zoomend', bcLabels); bcLabels();
+function showBeacons() { WIDE && BEACONS_ON ? beaconLayer.addTo(map) : beaconLayer.remove(); }
+document.getElementById('bc-on').addEventListener('change', e => {
+  BEACONS_ON = e.target.checked;
+  try { localStorage.setItem('heat.beacons', BEACONS_ON ? 'on' : 'off'); } catch (err) {}
+  showBeacons();
+});
 
 const VIRIDIS = [[68,1,84],[72,40,120],[62,74,137],[49,104,142],[38,130,142],[31,158,137],[53,183,121],[109,205,89],[180,222,44],[253,231,37]];
 function viridis(t) {
@@ -531,6 +568,7 @@ function applyMode(moveMap) {
   document.getElementById('ramps').innerHTML = '';
   [ring50, wideAirports].forEach(l => WIDE ? l.addTo(map) : l.remove());
   WIDE ? nearAirports.remove() : nearAirports.addTo(map);
+  showBeacons();
   if (moveMap) WIDE ? map.fitBounds(WIDE_BOUNDS) : map.setView([38.9444, -77.4558], 9);
   const status = document.getElementById('status'), covered = document.getElementById('covered');
   if (!META) {
