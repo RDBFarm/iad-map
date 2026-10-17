@@ -1,0 +1,23 @@
+{
+ "title": "\ud83d\udea8 7600 ASH6246 (Mesa Aviation Services) E75L \u2014 radio failure",
+ "body": "@RDBFarm \u2014 heard by the farm receiver at 2026-10-17 21:54:09 UTC.\n\n- **Squawk:** 7600 (radio failure)\n- **ADS-B emergency status:** radio failure\n- **Flight:** ASH6246 \u2014 Mesa Aviation Services (radio callsign AIR SHUTTLE)\n- **Aircraft:** registration N88327, type E75L (EMBRAER ERJ-170-200 (long wing)), ICAO AC2BB8\n- **Position:** 39.2736, -77.6977 \u2014 13 nm from the farm, bearing 303\u00b0\n- **Altitude:** 13,700 ft; **speed** 314 kt; **track** 332\u00b0\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=ac2bb8) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=ac2bb8) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`. A squawk can be set by mistake and corrected within seconds; this confirms only that the code was seen on 3 reads in a row._",
+ "event": {
+  "t": 1792274049,
+  "utc": "2026-10-17 21:54:09",
+  "hex": "ac2bb8",
+  "flight": "ASH6246",
+  "type": "E75L",
+  "code": "7600",
+  "emergency": "nordo",
+  "squawk": "7600",
+  "lat": 39.273609,
+  "lon": -77.697693,
+  "alt": 13700,
+  "gs": 314.5,
+  "track": 331.72,
+  "mlat": 0,
+  "dist_nm": 13.3,
+  "bearing": 303.2,
+  "pushed": true
+ }
+}
