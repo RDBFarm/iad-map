@@ -61,7 +61,8 @@ near map or the live map.
 import itertools, json, math, mmap, os, shutil, struct, time, zlib
 
 VERSION = 2
-# The area: the map's 50-mile circle around Dulles (publish.CENTER, RADIUS_NM)
+# The area: the 50-mile circle around Dulles (publish.CENTER, HEAT_RADIUS_NM; the
+# live map itself reaches 75 miles since 2026-10-18)
 LAT_MIN, LAT_MAX = 38.215, 39.675
 LON_MIN, LON_MAX = -78.392, -76.520
 DLAT = 0.001            # ~111 m

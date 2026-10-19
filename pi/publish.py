@@ -2,8 +2,8 @@
 """Publish the last 24 hours of recorded positions to GitHub.
 
 Run every 15 minutes by iad-map-publish.timer. Reads the collector's log
-(flights.db), keeps what the map shows -- positions within 50 statute miles
-of Dulles at or below 15,000 ft -- and writes, on the `live-data` branch of RDBFarm/iad-map:
+(flights.db), keeps what the map shows -- positions within 75 statute miles
+of Dulles at or below 15,000 ft (50 until 2026-10-18; older hours keep 50) -- and writes, on the `live-data` branch of RDBFarm/iad-map:
 
   live.json        what live.html reads first: the window, counts, KIAD
                    weather, the list of hour files with a hash of each, and
@@ -350,7 +350,11 @@ def departure_points(rows):
 AIRPORT_IDS = {"KIAD": 0, "KDCA": 1, "KBWI": 2, "KJYO": 3, "KGAI": 4, "KHEF": 5,
                "KRMN": 6, "enroute": 7, "KADW": 8, "KNYG": 9}
 CENTER = (38.9444, -77.4558)
-RADIUS_NM = 43.45  # 50 statute miles
+# The live map: 75 statute miles (owner, 2026-10-18: "Yes, widen to 75 miles"; it
+# measured ~21% more traffic below 15,000 ft than 50). The history heat map keeps
+# 50 (heatmap.NEAR is drawn for it), so it reads with HEAT_RADIUS_NM.
+RADIUS_NM = 65.17  # 75 statute miles
+HEAT_RADIUS_NM = 43.45  # 50 statute miles
 MAX_ALT_FT = 15000
 
 
@@ -361,13 +365,13 @@ def dist_nm(lat1, lon1, lat2, lon2):
     return 3440.065 * 2 * math.asin(math.sqrt(a))
 
 
-def load_points(start, end):
-    """Map positions from the log, as
+def load_points(start, end, radius_nm=RADIUS_NM):
+    """Map positions from the log within radius_nm of Dulles, as
     [t, hex, lat, lon, alt, gs, track, vrate, flight, type, mlat, category], one per
     distinct position (an aircraft's other messages repeat its last one)."""
     if not os.path.exists(DB_PATH):
         return []
-    lat_pad = RADIUS_NM / 60
+    lat_pad = radius_nm / 60
     lon_pad = lat_pad / math.cos(math.radians(CENTER[0]))
     db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=60)
     cur = db.execute("""
@@ -383,7 +387,7 @@ def load_points(start, end):
     rows, seen = [], set()
     for t, hexid, lat, lon, alt, gs, track, vrate, flight, actype, mlat, category in cur:
         key = (hexid, t)
-        if key in seen or dist_nm(lat, lon, *CENTER) > RADIUS_NM:
+        if key in seen or dist_nm(lat, lon, *CENTER) > radius_nm:
             continue
         seen.add(key)
         rows.append([int(t), hexid, round(lat, 5), round(lon, 5), int(alt),
@@ -798,7 +802,7 @@ def heat_points_for_hour(hour):
     exactly the live map's positions (its filters: departure climbs dropped,
     is_arrival); 'd' is an airborne position those take-off rules dropped.
     Ground traffic and ground vehicles are left out."""
-    logged = [r for r in load_points(hour - 600, hour + 3600) if r[4] <= MAX_ALT_FT]
+    logged = [r for r in load_points(hour - 600, hour + 3600, HEAT_RADIUS_NM) if r[4] <= MAX_ALT_FT]
     logged.sort(key=lambda r: (r[0], r[1]))
     departures = departure_points(logged)
     out = []
@@ -856,6 +860,15 @@ def log_start():
         db.close()
         return int(t) if t else None
     except sqlite3.Error:
+        return None
+
+
+def installed_version():
+    """'<commit> <merged at>' from /opt/iad-map/VERSION, written by install.sh; None if absent."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")) as f:
+            return f.read().strip() or None
+    except OSError:
         return None
 
 
@@ -927,6 +940,7 @@ def main():
     frozen = read_final()
     index, files, final = build(time.time(), wx, frozen)
     index["farm"]["summary"] = farm.summary(index["farm"]["passes"])
+    index["meta"]["pi_version"] = installed_version()   # which install is running, readable from anywhere
     enrich(index)
     final = archive(index, files, final | (frozen - set(files)), index["meta"]["end"])
     update_heat(index, final, index["meta"]["end"], wx)

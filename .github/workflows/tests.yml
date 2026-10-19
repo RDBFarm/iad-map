@@ -1,0 +1,22 @@
+# Every change is tested before it reaches the Pi or the pages: a small made-up
+# receiver log goes through the publisher, both history heat maps and the alert
+# rules, and the three pages are loaded in Chromium on what it produced. See
+# tests/fixture.py. Run the same locally with:
+#   python3 -m unittest discover -s tests -v
+name: Tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'    # what Raspberry Pi OS (Bookworm) runs
+      - run: pip install playwright==1.47.0 && python -m playwright install --with-deps chromium
+      - run: python3 tools/make_public.py --check
+      - run: python3 -m unittest discover -s tests -v

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Full recorded tracks, for drawing one aircraft's whole path on the map.
 
-The map's own points stop at 15,000 ft and 50 miles from Dulles. When the
+The map's own points stop at 15,000 ft and 75 miles from Dulles. When the
 owner selects a flight, the map instead draws its whole recorded path, at
 every altitude and range, from these files (owner's request, 2026-09-24).
 

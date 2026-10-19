@@ -201,6 +201,13 @@
     #time-row { gap:10px; }
     #clock { font-size:1.35rem; letter-spacing:1px; }
     #day-pick { max-width:8.5em; }
+    /* the playback bar wraps onto a second line: at 390 px its speed and window
+       sliders ran 320 px past the edge, out of reach (found by tests/test_pages.py) */
+    #controls { height:168px; padding:0 10px; gap:8px; }
+    #map { bottom:168px; }
+    #btn-row { flex-wrap:wrap; gap:6px 8px; }
+    #btn-row .btn { padding:4px 9px; }
+    #btn-row .ctrl-lbl { margin-left:0 !important; }
   }
   html, body { overflow-x:hidden; }
   /* near-the-farm search */
@@ -259,7 +266,7 @@
 <div id="hdr">
   <div>
     <h1>✈ IAD Flight Activity</h1>
-    <div class="sub">Washington Dulles · last 24 hours · 50-mile radius ·<!--farm--> RDBF receiver ·<!--/farm--> <span id="updated">loading…</span></div>
+    <div class="sub">Washington Dulles · last 24 hours · 75-mile radius ·<!--farm--> RDBF receiver ·<!--/farm--> <span id="updated">loading…</span></div>
   </div>
   <span class="badge" id="badge-pos">— positions</span>
   <span style="margin-left:auto"></span>
@@ -484,9 +491,9 @@ AP_MARKER_INFO.forEach(([lat, lon, label, color, radius]) => {
     offset: [6, 0], className: 'ap-label'});
 });
 
-// Subtle 50-mile radius ring around KIAD
+// Subtle 75-mile radius ring around KIAD (50 miles until 2026-10-18; older days were cut at 50)
 L.circle([38.9444,-77.4558],
-  {radius:80467, color:'rgba(64,180,255,0.2)',
+  {radius:120701, color:'rgba(64,180,255,0.2)',
     fillColor:'transparent', weight:1, dashArray:'6 5'}).addTo(map);
 
 // ── Aircraft family groupings ────────────────────────────────────────────
