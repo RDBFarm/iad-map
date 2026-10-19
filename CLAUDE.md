@@ -8,27 +8,39 @@ than assuming.
 
 ---
 
-## 0. Start here — status as of 2026-09-24
+## 0. Start here — status as of 2026-10-18
 
-**Everything below is installed and running on the Pi** (installed 09-24,
-~10:30 AM ET). Live map: **https://rdbfarm.github.io/iad-map/live.html**.
+**Running on the Pi** (systemd): `iad-map-collector` (logs every aircraft heard,
+every 2 s), `iad-map-alerts` (emergency squawks, low passes, sightings → GitHub
+issue + text message), `iad-map-publish.timer` (every 15 min → `live-data`:
+the live map, 30 days of hours, both history heat maps), `iad-map-aircraft-db.timer`
+(monthly type lookup). Each upload carries the installed version in
+`live.json` `meta.pi_version` (from 10-18; written by the installer).
 
-- **Running on the Pi** (systemd): `iad-map-collector` (logs every 2 s),
-  `iad-map-alerts` (emergencies + low passes → phone), `iad-map-publish.timer`
-  (every 15 min → `live-data` branch), `iad-map-aircraft-db.timer` (monthly).
-- **Verified live on 09-24:** first upload 10:30 AM; weather parses (29 KIAD
-  reports); aircraft types come through via the lookup (209/209); the test
-  alert reached his phone (issues #10–12, closed); full-path files arrive
-  (6 hours: 2,296 aircraft, 2.7 MB compressed, ~0.5 MB per hour).
-- **Not yet checked on the real Pi:** drive growth per day (estimate ~1 GB),
-  `publish.py` memory on the 2 GB Pi (measured ~490 MB in the sandbox), the
-  live map on his iPad.
-- **Decided 09-25: "over the farm" = over the land, heights above the ground.** A pass counts only when the aircraft's path (consecutive positions, or one position) crosses the parcel polygon (`farm.PARCEL`, Maryland iMAP, 213.4 acres; the office is inside) — replacing the 1 nm radius. Heights shown and used are **above the farm's ground**: reported pressure altitude + (KIAD altimeter − 29.92 inHg) × 1000, minus ground elevation at the nearest of a grid of USGS EPQS points measured once by the installer (`/mnt/flightdata/iad-map/farm_ground.json`; falls back to the notes' ~380 ft). Limits converted to keep his intent (~400 ft of ground): jets alert < 1,100 ft AGL, helicopters < 150 ft AGL, map highlights < 1,600 ft AGL. **Check after install:** that `farm_ground.json` exists (USGS reachable from the Pi) and that `wx[].altim_hpa` in live.json is filled (the METAR `altim` field name is unverified from here).
-- **Decided 09-25: emergencies push only on the squawk itself** (7500/7600/7700). The first 7500 alert (issue #25, 8:39 AM 09-25) was RPA5604, an E175 (N241JQ) at 27,000 ft ~97 nm SW, whose ADS-B emergency *status* read "unlawful" while its squawk was an ordinary 1631 — a glitch, and the old code titled it "7500". Status-only events are now logged and shown on the map as "status …", not pushed; titles show the real squawk. Alerts and cards now name the airline from `pi/operators.json` (tar1090-db): e.g. RPA = Republic Airlines (BRICKYARD), AVL = Aviation Adventures (the 09-24 close-approach Cessnas: a flight school), VXP = Avelo (AVELO).
-- **Decided 09-25: helicopters push only below 550 ft reported** (≈150 ft above the fields). The first real low-pass alert, PAT26 (an H60 Black Hawk) at 700 ft reported, ≈300 ft above the fields, 5:47 PM 09-24 (issue #21), was heard and "not concerning at all". Jets still push below 1,500 ft; helicopters between 550 and 1,500 ft are logged and shown, not pushed.
-- **Open:** close-approach thresholds (tune after a week of real traffic),
-  runway headings in the classifier (magnetic vs true), live map panels
-  overlapping at phone width.
+**Pages** (GitHub Pages, from `main`): `live.html` (75 miles, under 15,000 ft;
+day picker for 30 days), `flights.html` (the same without the farm, built by
+`tools/make_public.py`), `heat.html` (history: near = 50 mi under 15,000 ft
+with wind/airport/take-off choices; Wide = 200 mi, every height, radio beacons).
+
+**Tests:** `python3 -m unittest discover -s tests -v` (29 tests, ~25 s;
+the page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`
+and `LEAFLET_DIST=<leaflet dist folder>` when there is no network). They run on
+every PR and push (`.github/workflows/tests.yml`). `tests/fixture.py` is a
+made-up 3-hour log; extend it rather than building one-off test setups in a
+scratchpad, which is what every change before 10-18 did. **When a bug is fixed,
+add the test that would have caught it.**
+
+**Measured over a month (09-26 – 10-18):** every hour file present (563; two
+3 AM hours thin); 16 alerts (7 emergency squawks, 7 sightings, 1 low pass, 1
+test); repo 363 MB compressed with the 30-day window.
+
+**Still open:** drive growth per day and publisher memory on the real Pi were
+never measured (he declined self-reporting health for now, 10-18); close-
+approach thresholds (first guesses; he only sees jets ones); runway headings in
+the classifier (magnetic vs true); live map panels overlap at phone width
+(weather card over the altitude legend). Reminders already scheduled in the
+owner's session: 11-19 (UA 2853 on 11-21: wind, seat, the light at the farm;
+re-check the middle runway), 2027-01-15 (777-9 deliveries: drop `B779`).
 
 ### How to change something on the Pi
 All Pi code is in `pi/` on `main`. Merge the change, then have him run on
@@ -42,8 +54,15 @@ sudo bash install.sh
 ```
 
 The installer is safe to re-run: it keeps the log, events, key and lookup,
-replaces the programs, and restarts running services. It prints the deploy
-key again at the end; ignore it unless the key changed. Changes to
+replaces the programs, and restarts running services. **Since 10-18 it installs
+the exact commit `main` points at** (asks api.github.com, then downloads from
+`raw.githubusercontent.com/<sha>/`, and re-runs itself from that commit if the
+copy he fetched is older): `.../main/...` was served stale for minutes after a
+merge more than once, costing a second run and a `grep -c` check each time. It
+writes `/opt/iad-map/VERSION`, and a re-run ends with one line, "Done: version
+abc1234 ... installed and running", instead of the first-install key banner,
+which he kept pasting back. Check what's running from anywhere:
+`meta.pi_version` in `live.json`. Changes to
 `live.html` need nothing on the Pi (Pages publishes a minute or two after
 merge).
 
@@ -165,7 +184,7 @@ receiver: 291 aircraft (271 with position), ~1,683 messages/sec.
 See `README.md` for how to install. In short:
 
 - **`pi/collector.py`** — logs to SQLite at **`/mnt/flightdata/iad-map/flights.db`**. One row per aircraft per read, for every aircraft with a new message: all ranges and altitudes, with or without position. Buffers and commits every 30 s. **Refuses to start if `/mnt/flightdata` isn't mounted.** Deletes nothing.
-- **`pi/publish.py`** — every 15 min (systemd timer): last 24 h, within 50 statute mi of KIAD, ≤15,000 ft → one JSON file per UTC hour plus `live.json` on the **`live-data`** branch, as a single commit replaced and force-pushed, plus `live-data-prev` (same files, with the previous push as parent). Each push sends only the current hour and the index.
+- **`pi/publish.py`** — every 15 min (systemd timer): last 24 h, within **75** statute mi of KIAD (50 until 10-18: his "Yes, widen to 75 miles", after it measured ~21% more traffic below 15,000 ft; hours already frozen keep 50; the history heat map stays at 50 via `HEAT_RADIUS_NM`), ≤15,000 ft → one JSON file per UTC hour plus `live.json` on the **`live-data`** branch, as a single commit replaced and force-pushed, plus `live-data-prev` (same files, with the previous push as parent). Each push sends only the current hour and the index.
   - **Fixed 09-26: every push was sending the whole tree (~18 MiB, ~1.8–2.1 GiB/day measured with vnstat on the Pi).** Two causes. (1) Git skips files the remote has only when the remote's commit is a *parent* of the pushed one; an amended single commit has none, so git sent all ~57 MiB of files every run (reproduced locally: one changed file, 19.6 MiB sent). `live-data-prev` supplies the parent link. (2) Finished hour files were rebuilt each run and some changed: e.g. an aircraft last heard low that reappears hours later climbing makes the departure rule drop points from the old hour (shown in a test). Now an hour file is built once, `SETTLE_S` (10 min) after the hour ends, and read back from disk after that; the list of final files is kept in `publish/.git/iad-map-final-hours`. Same for `t/`. On a simulated day the pushes went from ~2,300 KiB each to 17–130 KiB. **Verified on the Pi 09-26** (installed 12:4x EDT, `vnstat -5 -i eth0`): push blocks went from 20.8–22.1 MiB tx to 4.9–5.1 MiB, about 0.4–0.5 MiB above the neighbouring quiet blocks (4.5–4.7 MiB), including the first run after install. Pushes with a **deploy key** scoped to this repo only.
 - **Classification** — `classify_airport()`, `is_arrival()` and the climb-sequence departure rule copied from `render_github.py`. The departure rule runs on each aircraft's points thinned to ≥10 s (the spacing it was written for); the map itself is never thinned. **Decided 09-26: a rise counts toward a climb only when the thinned points are ≤60 s apart** (`CLIMB_MAX_GAP_S`; suggested by the Pi/network session, his call). Before it, an aircraft last heard low and heard again hours later higher up read as one climb, and its earlier arrival points were dropped. Frozen hours keep the old rule; only hours built after the installer run use it. Fixed 09-24: GA flag requires an N-number, not any N-callsign (Spirit, NKS, was caught); two-letter airline hints removed.
 - **`live.html`** — fetches the hour files from raw.githubusercontent.com (Pages is not rebuilt), refetches only changed hours every 5 min. Points held in typed-array columns. Dots **viridis by altitude**, brightest at the ground; neutral labelled airport markers.
@@ -275,6 +294,8 @@ See `README.md` for how to install. In short:
 - `pi/alerts.py` pushes once per visit (a visit ends after 30 min out of range) when the straight-line distance from the farm centre, height above the farm's ground included, is within `SIGHT_MI` = 12 statute miles, or within KIAD's reported visibility when under 10 mi. In range on 2 reads in a row. The alert says where to look (compass, degrees above the horizon), distance, height, heading. Logged to `events/sightings.jsonl`.
 - **12 miles is my estimate** of how far a big jet shows as a dot in clear air, not a measured or stated figure; he can change it. Cloud between the farm and the aircraft is not known.
 - Tested by running `watch()` over scripted reads (AF1 passing ~6 mi E, returning 40 min later, an E-4B 20 mi out, a Cessna overhead, and again with 3 mi visibility): two AF1 alerts, nothing else; nothing at 3 mi visibility.
+- **Only when worth looking (10-18, his request):** "make it so sightings look at the direction of the plane in terms of if it is even worth while". Every one of the first 7 sightings (10-07 – 10-13) had pushed at exactly 12 mi, the moment it crossed the line, so "look SE" was where it first appeared. Now the path is projected straight ahead (track, ground speed, climb/descent; `sight_path`), and it pushes only if that path is **in sight within 5 min for at least a minute**, in sight meaning ≤ `SIGHT_MI` and ≥ `SIGHT_MIN_ELEV` = 5° above the horizon (my estimate of the treeline; his to change). The alert gives the closest point (direction, height, distance, minutes away) and where it is now. In range but not worth it is logged once per visit with `why_not` (heading away, too low, only briefly in sight). **Replayed on the 7 real sightings** (t/ files): all 7 still alert, 1–9 min earlier; the predicted closest direction was within one compass point of the actual closest in 6 of 7 (the old direction: 2 of 7). The actual passes were much closer than the alerts said: 5 of 7 came within 2.7–8.5 mi, three of them 58–84° up. Straight-line prediction misses turns (the 10-07 doomsday plane was predicted 5 mi WNW and stayed 11.5 mi SSE).
+- **Watched flights (10-18, his request):** `pi/watch_flights.json` (hand-kept; `watch.json` is generated) names flights by callsign with optional Eastern dates; the same rules as AF1. First entry: **UAL2853 on 2026-11-21** (Denver–Dulles; usually a 737-900 landing ~5:05–5:25 PM, likely after sunset). Simulated south-flow arrival down the west lane: pushes ~4–7 min before passing, "look W, about 46° up, 1 mi away".
 
 ### 30-day history (built 09-26, his request)
 - He first put it on hold until the Barn Office HubDuo hangs after uploads are explained, then (same day): "as long as the file sizes don't change with the longer timeline on the webpage I am comfortable changing that now." So the condition is upload size, and it was measured.
@@ -292,6 +313,11 @@ See `README.md` for how to install. In short:
 
 ### Planned, not built
 - **Layering live tracks on the heat map** was the original idea; the live map is a separate page instead, and the historical map is frozen.
+- **Self-reported health + a "data stopped" watchdog** (disk, log growth, memory, failed pushes in `live.json`; a scheduled Action alerting after an hour without uploads): proposed 10-18, **he said "no need for now"**.
+
+### Checked 10-18 (for the parked items)
+- **777-9 (`B779` in Experimental):** no deliveries until at least 2027 (Aviation Week, "Boeing Confirms No 777-9 Deliveries Until At Least 2027"; an Oct 2026 report names Lufthansa as launch operator in 2027). Keep it until then; he agreed to drop it when deliveries start.
+- **Dulles middle runway (1C/19C):** closed "at least through November 2026" (Loudoun County notice, 09-25); one report says through Nov 22. Our tracks agree: landings 10-16 – 10-18 used two lanes only, ~0.75–1.0 nm west and ~1.0 nm east of the IAD reference point (340 landing south, 659 landing north), nothing in the middle. So the Nov 21 seat advice (seat A, south-flow days only) stands.
 
 ---
 
@@ -317,6 +343,6 @@ Kept for reference only; not to be fixed or rebuilt.
 ## 7. Where things live
 
 - Repo: `rdbfarm/iad-map` (GitHub Pages). Live map: `live.html`. Historical map: `iad_map_github.html`.
-- Pi code: `pi/` (installed to `/opt/iad-map`, run as system user `iadmap`). Log: `/mnt/flightdata/iad-map/flights.db`. Type lookup: `/mnt/flightdata/iad-map/aircraft.db`. Events: `/mnt/flightdata/iad-map/events/*.jsonl` (emergencies, low_passes, close_approaches, tcas, farm_passes; never pruned). Deploy key: `/var/lib/iad-map/deploy_key` (added to **iad-map** as "Stables Pi", read/write).
+- Pi code: `pi/` (installed to `/opt/iad-map`, run as system user `iadmap`). Tests: `tests/`. Hand-kept Pi data: `pi/watch_flights.json`; generated: `pi/watch.json`, `pi/notable.json` (`tools/make_notable.py`), `beacons.js` (`tools/make_beacons.py`). Log: `/mnt/flightdata/iad-map/flights.db`. Type lookup: `/mnt/flightdata/iad-map/aircraft.db`. Events: `/mnt/flightdata/iad-map/events/*.jsonl` (emergencies, low_passes, close_approaches, tcas, farm_passes; never pruned). Deploy key: `/var/lib/iad-map/deploy_key` (added to **iad-map** as "Stables Pi", read/write).
 - Branches written by the Pi (machine-written; do not edit): `live-data` (map data, one replaced commit), `live-data-prev` (the same files on top of the previous push, only so git sends just the changes), `alerts` (one commit per alert; the workflow on it opens the issues).
 - Pi live JSON: `/run/readsb/aircraft.json`

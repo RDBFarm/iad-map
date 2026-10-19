@@ -34,12 +34,26 @@ on 09-25.
 
 Also (owner, 2026-09-26: "an alert if it is within sight of the farm ... I
 could see it with my own eyes"): Air Force One and the doomsday planes
-(watch.json, from plane-alert-db) push once per visit when their straight-
-line distance from the farm, height included, is within SIGHT_MI -- or
-within KIAD's reported visibility when that is less than 10 miles. The alert
-says which way to look and how high. SIGHT_MI is an estimate of how far a
-big jet shows as a dot in clear air, not a measured figure; clouds between
-the farm and the aircraft are not known. Logged to events/sightings.jsonl.
+(watch.json, from plane-alert-db), and the flights named in
+watch_flights.json on the days given there (owner, 2026-10-18: UA 2853 on
+Nov 21), push once per visit when they are worth stepping outside for:
+
+  "In sight" is a straight-line distance from the farm, height included,
+  within SIGHT_MI -- or within KIAD's reported visibility when that is less
+  than 10 miles -- and at least SIGHT_MIN_ELEV degrees above the horizon
+  (lower is likely behind trees). SIGHT_MI and SIGHT_MIN_ELEV are estimates,
+  not measured figures; cloud between the farm and the aircraft isn't known.
+  "Worth it" (owner, 2026-10-18: "look at the direction of the plane in
+  terms of if it is even worth while"): its path is projected straight ahead
+  at its present track, speed and climb or descent; it pushes only when that
+  path is in sight within SIGHT_LEAD_S and stays in sight at least SIGHT_MIN_S.
+  So a plane heading away at the edge of the range does not push, and one
+  heading this way pushes a few minutes early. Until then every one of the
+  first seven sightings had pushed at exactly 12 miles, the moment it
+  crossed the line, with a direction that was only where it first appeared.
+  The alert says which way to look and how high at its closest, and when.
+  Logged to events/sightings.jsonl; one in range that isn't worth it is
+  logged too (pushed false, with the reason), once per visit.
 
 Every pushed alert is also sent as a text message when text.json is set up
 (owner, 2026-09-26): an email to his carrier's email-to-text address, sent
@@ -57,8 +71,9 @@ Pushes that fail (no internet) are retried every read until they succeed.
   python3 alerts.py --test       push one alert marked TEST (and text it), then exit
   python3 alerts.py --setup-text ask for the text-message settings, save them, send a test text
 """
-import getpass, json, math, os, smtplib, ssl, subprocess, sys, time
+import datetime, getpass, json, math, os, smtplib, ssl, subprocess, sys, time
 from email.message import EmailMessage
+from zoneinfo import ZoneInfo
 
 import aircraft_lookup
 import farm
@@ -82,11 +97,18 @@ STATUS_WORDS = {"general": "general emergency", "nordo": "radio failure",
 WORK_DIR = os.environ.get("IADMAP_PUBLISH_DIR", os.path.join(DRIVE, "iad-map", "publish"))
 LOW_PASS_REPEAT_S = 600
 SIGHT_MI = 12            # statute miles, straight line; an estimate, see above
-SIGHT_CONFIRM_READS = 2  # in range on this many reads in a row before it counts
+SIGHT_MIN_ELEV = 5       # degrees above the horizon; lower is likely behind trees (an estimate)
+SIGHT_AHEAD_S = 600      # its path is projected this far ahead
+SIGHT_LEAD_S = 300       # push when it will be in sight within this long...
+SIGHT_MIN_S = 60         # ...and stay in sight at least this long
+SIGHT_STEP_S = 5
+SIGHT_CONFIRM_READS = 2  # worth it on this many reads in a row before it counts
 SIGHT_GAP_S = 1800       # out of range this long ends a visit; the next one alerts again
+LOCAL = ZoneInfo("America/New_York")
 TEXT_CONF = os.path.join(os.path.dirname(DEPLOY_KEY), "text.json")
 TEXT_MAX = 160           # one SMS
 WATCH_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watch.json")
+WATCH_FLIGHTS_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watch_flights.json")
 COMPASS16 = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
              "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
 
@@ -368,6 +390,33 @@ def load_watch():
         return {}
 
 
+def load_watch_flights():
+    """{callsign: {"name", "dates"}} from watch_flights.json; no dates = every day."""
+    try:
+        with open(WATCH_FLIGHTS_JSON) as f:
+            return {c.strip().upper(): v for c, v in json.load(f)["flights"].items()}
+    except (OSError, ValueError, KeyError, AttributeError):
+        return {}
+
+
+def watched(ac, watch, flights, now):
+    """(name, registration, type name, callsign if a watched flight) for a
+    watched aircraft, or a watched flight on one of its days; None otherwise."""
+    h = (ac.get("hex") or "").lower()
+    if h in watch:
+        name, reg, type_name = watch[h]
+        return name, reg, type_name, None
+    fl = (ac.get("flight") or "").strip().upper()
+    e = flights.get(fl)
+    if not e:
+        return None
+    day = datetime.datetime.fromtimestamp(now, LOCAL).date().isoformat()
+    if e.get("dates") and day not in e["dates"]:
+        return None
+    t = actype(ac)
+    return e.get("name") or fl, aircraft_lookup.reg_for(h), farm.type_name(t) or t or "type unknown", fl
+
+
 def sight_limit_mi():
     """SIGHT_MI, or KIAD's visibility when it is reported below 10 miles
     (10 means "10 or more" in a METAR)."""
@@ -375,51 +424,109 @@ def sight_limit_mi():
     return min(SIGHT_MI, vis) if vis is not None and vis < 10 else SIGHT_MI
 
 
-def sighting(ac, watch):
-    """For a watched aircraft with a fresh position: (slant_mi, horiz_mi,
-    bearing, elevation_deg, agl_ft); None otherwise."""
-    h = (ac.get("hex") or "").lower()
+def look(x, y, agl):
+    """From the farm to a point x nm east and y nm north, agl ft above its
+    ground: (slant_mi, horiz_mi, bearing, elevation_deg)."""
+    horiz = math.hypot(x, y) * 1.15078
+    slant = math.hypot(horiz, agl / 5280)
+    elev = math.degrees(math.atan2(agl, horiz * 5280)) if horiz or agl else 90.0
+    return slant, horiz, (math.degrees(math.atan2(x, y)) + 360) % 360, elev
+
+
+def in_sight(v, limit):
+    return v[0] <= limit and v[3] >= SIGHT_MIN_ELEV
+
+
+def sight_path(ac, agl, limit):
+    """Its path straight ahead for SIGHT_AHEAD_S at its present track, ground
+    speed and climb or descent (flat earth: fine at these distances) ->
+    {"now": look(), "closest": (in_s, slant, horiz, bearing, elev, agl),
+     "window": (first, last) seconds from now in sight, or None}."""
+    x = (ac["lon"] - farm.FARM[1]) * 60 * math.cos(math.radians(farm.FARM[0]))
+    y = (ac["lat"] - farm.FARM[0]) * 60
+    gs, trk = ac.get("gs"), ac.get("track")
+    rate = ac.get("baro_rate") if ac.get("baro_rate") is not None else ac.get("geom_rate")
+    moving = gs is not None and trk is not None and gs > 30
+    now = look(x, y, agl)
+    best, first, last = None, None, None
+    for t in range(0, SIGHT_AHEAD_S + 1, SIGHT_STEP_S) if moving else (0,):
+        d = gs * t / 3600 if moving else 0.0
+        a = max(0.0, agl + (rate or 0) * t / 60)
+        v = look(x + d * math.sin(math.radians(trk or 0)), y + d * math.cos(math.radians(trk or 0)), a)
+        if best is None or v[0] < best[1]:
+            best = (t, *v, a)
+        if in_sight(v, limit):
+            first = t if first is None else first
+            last = t
+        elif last is not None:
+            break                          # out of sight again: the window is over
+    if not moving and first is not None:
+        last = SIGHT_AHEAD_S               # not going anywhere: in sight for now
+    return {"now": now, "closest": best, "window": (first, last) if first is not None else None}
+
+
+def sight_verdict(p, limit):
+    """None if the projected path is worth an alert, else why not."""
+    w = p["window"]
+    if w is None:
+        return "too low" if p["closest"][1] <= limit else "not coming within sight"
+    if w[0] > SIGHT_LEAD_S:
+        return "not yet"
+    if w[1] - w[0] < SIGHT_MIN_S:
+        return "heading away" if w[0] == 0 else "only briefly in sight"
+    return None
+
+
+def sighting(ac, who):
+    """For a watched aircraft with a fresh position: (path from sight_path,
+    agl_ft now); None otherwise."""
     alt = ac.get("alt_baro")
-    if h not in watch or ac.get("lat") is None or ac.get("seen_pos", 99) > 10:
+    if who is None or ac.get("lat") is None or ac.get("seen_pos", 99) > 10:
         return None
-    nm, brg = dist_bearing(farm.FARM[0], farm.FARM[1], ac["lat"], ac["lon"])
-    horiz_mi = nm * 1.15078
     if alt == "ground":
         agl = 0
     elif isinstance(alt, (int, float)):
         agl = max(0, farm.height_agl(alt, ac["lat"], ac["lon"], current_altim()) or 0)
     else:
         return None
-    slant = math.hypot(horiz_mi, agl / 5280)
-    elev = math.degrees(math.atan2(agl, horiz_mi * 5280)) if horiz_mi or agl else 90
-    return slant, horiz_mi, brg, elev, agl
+    return sight_path(ac, agl, sight_limit_mi()), agl
 
 
-def sighting_event(ac, now, s, watch, limit):
-    slant, horiz, brg, elev, agl = s
-    name, reg, type_name = watch[(ac.get("hex") or "").lower()]
+def sighting_event(ac, now, p, agl, who, limit):
+    slant, horiz, brg, elev = p["now"]
+    in_s, c_slant, c_horiz, c_brg, c_elev, c_agl = p["closest"]
+    name, reg, type_name, flight_watch = who
     return {"kind": "sighting", "t": int(now), "utc": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now)),
             "hex": ac.get("hex", ""), "flight": (ac.get("flight") or "").strip(), "type": actype(ac),
-            "name": name, "reg": reg, "type_name": type_name,
+            "name": name, "reg": reg, "type_name": type_name, "watched_flight": flight_watch,
             "slant_mi": round(slant, 1), "horiz_mi": round(horiz, 1), "bearing": round(brg),
             "elev_deg": round(elev), "agl": round(agl), "alt": ac.get("alt_baro"),
+            "closest": {"in_s": in_s, "slant_mi": round(c_slant, 1), "horiz_mi": round(c_horiz, 1),
+                        "bearing": round(c_brg), "elev_deg": round(c_elev), "agl": round(c_agl)},
+            "in_sight_s": list(p["window"]) if p["window"] else None,
             "gs": ac.get("gs"), "track": ac.get("track"), "lat": ac["lat"], "lon": ac["lon"],
             "limit_mi": limit, "visibility_mi": current_visibility(),
             "mlat": 1 if "lat" in (ac.get("mlat") or []) else 0}
 
 
 def compose_sighting(ev):
-    look = COMPASS16[round(ev["bearing"] / 22.5) % 16]
+    c = ev.get("closest") or {"in_s": 0, "slant_mi": ev["slant_mi"], "horiz_mi": ev["horiz_mi"],
+                              "bearing": ev["bearing"], "elev_deg": ev["elev_deg"], "agl": ev["agl"]}
+    look_c = COMPASS16[round(c["bearing"] / 22.5) % 16]
+    look_now = COMPASS16[round(ev["bearing"] / 22.5) % 16]
     heading = (f", heading {COMPASS16[round(ev['track'] / 22.5) % 16]}" if ev.get("track") is not None else "")
     who = ev["reg"] or ev.get("flight") or ev["hex"].upper()
-    title = (f"👀 {ev['name']} ({who}) within sight of the farm: look {look}, "
-             f"about {ev['elev_deg']}° up, {ev['slant_mi']:.0f} mi away")
+    mins = round(c["in_s"] / 60)
+    when = "in sight now" if mins < 1 else f"coming into sight: closest in about {mins} min"
+    title = (f"👀 {ev['name']} ({who}) {when}, look {look_c}, "
+             f"about {c['elev_deg']}° up, {c['slant_mi']:.0f} mi away")
     body = "\n".join([
-        f"@RDBFarm — {ev['name']} ({who}, {ev['type_name']}) came within sight range of the farm at {ev['utc']} UTC.",
+        f"@RDBFarm — {ev['name']} ({who}, {ev['type_name']}) is worth looking for from the farm ({ev['utc']} UTC).",
         "",
-        f"- **Where to look:** {look} (bearing {ev['bearing']}°), about {ev['elev_deg']}° above the horizon",
-        f"- **Distance:** {ev['slant_mi']:.1f} miles in a straight line ({ev['horiz_mi']:.1f} miles across the ground)",
-        f"- **Height:** about {ev['agl']:,} ft above the farm's ground{heading}"
+        f"- **At its closest** ({'now' if mins < 1 else f'in about {mins} min'}): look {look_c} (bearing {c['bearing']}°), "
+        f"about {c['elev_deg']}° above the horizon, {c['slant_mi']:.1f} miles away, about {c['agl']:,} ft up",
+        f"- **Right now:** {look_now} (bearing {ev['bearing']}°), {ev['slant_mi']:.1f} miles away, "
+        f"about {ev['agl']:,} ft above the farm's ground{heading}"
         + (f", {ev['gs']:.0f} kt" if ev.get("gs") is not None else ""),
         f"- **Callsign:** {ev.get('flight') or 'not broadcast'}; ICAO {ev['hex'].upper()}",
         "",
@@ -427,10 +534,11 @@ def compose_sighting(ev):
         f"[Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao={ev['hex']}) · "
         "[Live map](https://rdbfarm.github.io/iad-map/live.html)",
         "",
-        f"_Automatic alert from `pi/alerts.py`: within {ev['limit_mi']:g} miles"
-        + (f" (KIAD visibility {ev['visibility_mi']:g} mi)" if ev.get("visibility_mi") is not None and ev["visibility_mi"] < 10 else "")
-        + ". That range is an estimate of how far a big jet shows as a dot in clear air; "
-        "cloud between the farm and the aircraft isn't known. Once per visit._"])
+        f"_Automatic alert from `pi/alerts.py`, once per visit. Its path is projected straight ahead at its present "
+        f"course, speed and climb or descent; it alerts only when that path is in sight (within {ev['limit_mi']:g} miles"
+        + (f", KIAD visibility {ev['visibility_mi']:g} mi" if ev.get("visibility_mi") is not None and ev["visibility_mi"] < 10 else "")
+        + f", at least {SIGHT_MIN_ELEV}° up) within {SIGHT_LEAD_S // 60} minutes for at least a minute. "
+        "Those limits are estimates; a turn changes the path, and cloud isn't known._"])
     return title, body
 
 
@@ -480,9 +588,11 @@ def watch():
     last_pos = {}    # hex -> (t, lat, lon, alt) from the previous read
     low_last = {}    # hex -> time of last low-pass push
     low_logged = {}  # hex -> time of last low-pass logged without a push
-    sight_streak = {}  # hex -> consecutive reads in sight range
-    sight_last = {}    # hex -> last time in sight range, for the visit it alerted
+    sight_streak = {}  # hex -> consecutive reads worth an alert
+    sight_last = {}    # hex -> last time near, for the visit it alerted
+    sight_logged = {}  # hex -> last time near, for a visit logged as not worth it
     watch_list = load_watch()
+    watch_flights = load_watch_flights()
     pending = False
     rx = receiver_position()
     while True:
@@ -505,23 +615,35 @@ def watch():
                 prev = None
             if ac.get("lat") is not None and isinstance(ac.get("alt_baro"), (int, float)):
                 last_pos[h] = (now, ac["lat"], ac["lon"], ac["alt_baro"])
-            s = sighting(ac, watch_list)
+            who = watched(ac, watch_list, watch_flights, now)
+            s = sighting(ac, who) if who else None
             limit = sight_limit_mi()
-            if s and s[0] <= limit:
-                streak_now[h] = sight_streak.get(h, 0) + 1
+            if s and (s[0]["now"][0] <= limit or s[0]["window"]):
+                p, agl = s
+                why_not = sight_verdict(p, limit)
                 if h in sight_last:
                     sight_last[h] = now                   # same visit, already alerted
-                elif streak_now[h] >= SIGHT_CONFIRM_READS:
-                    sight_last[h] = now
-                    ev = sighting_event(ac, now, s, watch_list, limit)
-                    ev["pushed"] = True
-                    append_event(ev, "sightings.jsonl")
-                    print("alerts: sighting", ev["name"], ev["reg"], ev["slant_mi"], "mi", flush=True)
-                    try:
-                        queue_alert(ev)
-                        pending = True
-                    except (OSError, subprocess.SubprocessError) as e:
-                        print("alerts: could not queue alert:", e, flush=True)
+                elif why_not is None:
+                    streak_now[h] = sight_streak.get(h, 0) + 1
+                    if streak_now[h] >= SIGHT_CONFIRM_READS:
+                        sight_last[h] = now
+                        ev = sighting_event(ac, now, p, agl, who, limit)
+                        ev["pushed"] = True
+                        append_event(ev, "sightings.jsonl")
+                        print("alerts: sighting", ev["name"], ev["reg"], ev["closest"]["slant_mi"], "mi in",
+                              ev["closest"]["in_s"], "s", flush=True)
+                        try:
+                            queue_alert(ev)
+                            pending = True
+                        except (OSError, subprocess.SubprocessError) as e:
+                            print("alerts: could not queue alert:", e, flush=True)
+                elif p["now"][0] <= limit:
+                    if h not in sight_logged:            # in range but not worth it: logged once per visit
+                        ev = sighting_event(ac, now, p, agl, who, limit)
+                        ev["pushed"], ev["why_not"] = False, why_not
+                        append_event(ev, "sightings.jsonl")
+                        print("alerts: sighting not pushed (" + why_not + ")", ev["name"], ev["reg"], flush=True)
+                    sight_logged[h] = now
             where = low_pass_candidate(ac, prev)
             if where:
                 push = low_pass_should_push(ac, where[3])
@@ -571,6 +693,7 @@ def watch():
         low_logged = {h: t for h, t in low_logged.items() if now - t <= LOW_PASS_REPEAT_S}
         sight_streak = streak_now
         sight_last = {h: t for h, t in sight_last.items() if now - t <= SIGHT_GAP_S}
+        sight_logged = {h: t for h, t in sight_logged.items() if now - t <= SIGHT_GAP_S}
         for key, last in list(active.items()):
             if now - last > EPISODE_GAP_S:
                 del active[key]

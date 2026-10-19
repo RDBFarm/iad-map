@@ -5,7 +5,7 @@
 # It does not touch readsb, tar1090 or the ADS-B Exchange feed.
 set -euo pipefail
 
-SRC=https://raw.githubusercontent.com/RDBFarm/iad-map/main/pi
+REPO=RDBFarm/iad-map
 HOME_DIR=/var/lib/iad-map          # the GitHub key only; small
 DATA_DIR=/mnt/flightdata/iad-map   # the log and the publish copy, on the USB drive
 USER_NAME=iadmap
@@ -14,6 +14,32 @@ if [ "$(id -u)" -ne 0 ]; then echo "Please run with sudo."; exit 1; fi
 
 echo "== Checking what's needed"
 command -v python3 >/dev/null || { echo "python3 is missing; stopping."; exit 1; }
+
+# Install exactly the commit main points at. Files under .../main/... can be served
+# stale for a few minutes after a merge (it has cost a second run more than once);
+# files at a commit never change. If this copy of the installer is older than that
+# commit's, run that one instead.
+SHA=${IADMAP_SHA:-}
+WHEN=${IADMAP_WHEN:-}
+if [ -z "$SHA" ]; then
+  INFO=$(curl -fsSL "https://api.github.com/repos/$REPO/commits/main" 2>/dev/null || true)
+  SHA=$(printf '%s' "$INFO" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])' 2>/dev/null || true)
+  WHEN=$(printf '%s' "$INFO" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"]["committer"]["date"])' 2>/dev/null || true)
+fi
+if [ -n "$SHA" ]; then
+  SRC=https://raw.githubusercontent.com/$REPO/$SHA/pi
+  if [ -z "${IADMAP_PINNED:-}" ]; then
+    NEWER=$(mktemp)
+    if curl -fsSL "$SRC/install.sh" -o "$NEWER" && ! cmp -s "$NEWER" "$0"; then
+      echo "   running the installer from version ${SHA:0:7}"
+      IADMAP_PINNED=1 IADMAP_SHA=$SHA IADMAP_WHEN=$WHEN exec bash "$NEWER"
+    fi
+    rm -f "$NEWER"
+  fi
+else
+  echo "   note: couldn't ask GitHub for the latest version; using main as served"
+  SRC=https://raw.githubusercontent.com/$REPO/main/pi
+fi
 if ! command -v git >/dev/null; then
   echo "   installing git"; apt-get update -qq && apt-get install -y -qq git
 fi
@@ -29,10 +55,11 @@ mkdir -p "$HOME_DIR" "$DATA_DIR" /opt/iad-map
 chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR" "$DATA_DIR"
 
 echo "== Downloading the programs"
-for f in collector.py publish.py proximity.py farm.py alerts.py aircraft_lookup.py tracks.py heatmap.py aircraft_types.json operators.json watch.json; do
+for f in collector.py publish.py proximity.py farm.py alerts.py aircraft_lookup.py tracks.py heatmap.py aircraft_types.json operators.json watch.json watch_flights.json; do
   curl -fsSL "$SRC/$f" -o "/opt/iad-map/$f"
 done
 chmod 755 /opt/iad-map/*.py; chmod 644 /opt/iad-map/*.json
+printf '%s %s\n' "${SHA:-main}" "${WHEN:-unknown}" > /opt/iad-map/VERSION   # publish.py puts it in live.json
 
 echo "== Setting up the services"
 cat > /etc/systemd/system/iad-map-collector.service <<UNIT
@@ -134,12 +161,20 @@ systemctl enable iad-map-publish.timer iad-map-alerts.service
 # On a re-run, restart what is already running so it picks up the new programs.
 systemctl try-restart iad-map-collector.service iad-map-alerts.service
 
-if [ ! -f "$HOME_DIR/deploy_key" ]; then
-  sudo -u "$USER_NAME" ssh-keygen -q -t ed25519 -N "" -C "rdbf-adsb-pi" -f "$HOME_DIR/deploy_key"
+if [ -n "$SHA" ]; then VERSION_LINE="version ${SHA:0:7}${WHEN:+, merged $WHEN}"; else VERSION_LINE="the version on main"; fi
+if [ -f "$HOME_DIR/deploy_key" ]; then
+  # A re-run: the key is already on GitHub and the services were restarted above.
+  echo
+  echo "=================================================================="
+  echo " Done: $VERSION_LINE installed and running. Nothing else to do."
+  echo "=================================================================="
+  exit 0
 fi
+sudo -u "$USER_NAME" ssh-keygen -q -t ed25519 -N "" -C "rdbf-adsb-pi" -f "$HOME_DIR/deploy_key"
 
 echo
 echo "=================================================================="
+echo " Installed $VERSION_LINE."
 echo " Logging to $DATA_DIR/flights.db has started. One step left: let this Pi write to GitHub."
 echo " Copy the whole line below (it starts with ssh-ed25519):"
 echo

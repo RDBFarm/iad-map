@@ -1,0 +1,6 @@
+{
+ "_note": "Flights that text the owner when they are worth looking for from the farm (alerts.py, the same rules as Air Force One). Hand-kept, unlike watch.json. A flight with dates alerts only on those Eastern-time days; without dates, every day. Owner's request 2026-10-18: UA 2853 on Nov 21.",
+ "flights": {
+  "UAL2853": {"name": "UA 2853 from Denver", "dates": ["2026-11-21"]}
+ }
+}

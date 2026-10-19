@@ -16,7 +16,7 @@ The Raspberry Pi in the stables runs two small programs from `pi/`:
   free it deletes the oldest day at a time until 15 GB is free. It won't
   start if the drive isn't mounted, so nothing lands on the SD card.
 - `publish.py` runs every 15 minutes, takes the last 24 hours of positions
-  within 50 miles of Dulles at or below 15,000 ft, and writes, on the `live-data` branch,
+  within 75 miles of Dulles at or below 15,000 ft, and writes, on the `live-data` branch,
   one file per hour of positions (`h/`) and an index, `live.json`, with the
   counts and KIAD weather reports from aviationweather.gov. The branch is one
   commit, replaced and force-pushed each time, so the repository doesn't grow.
@@ -101,3 +101,16 @@ which could never match, were removed.
 Still open: runway headings are runway numbers (magnetic) while ADS-B track
 is true north, and KIAD is listed as 19/199. Not yet checked against
 published true bearings; to be looked at with real traffic.
+
+## Tests
+
+    python3 -m unittest discover -s tests -v
+
+A made-up three-hour receiver log (`tests/fixture.py`) goes through the
+publisher, both history heat maps and the alert rules, and the three pages are
+opened in Chromium on what it produced (skipped when Playwright isn't
+installed). The installer is checked too: it must download every file the Pi
+programs import or read. GitHub runs them on every pull request and push.
+
+Flights to text about when they pass within sight of the farm are listed in
+`pi/watch_flights.json` (callsign, a name, and optional Eastern-time dates).
