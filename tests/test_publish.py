@@ -47,6 +47,14 @@ class Publish(unittest.TestCase):
         for name in self.files:
             self.assertEqual(again[name], self.files[name], name)
 
+    def test_a_failing_git_command_logs_why(self):
+        import contextlib, io, subprocess
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(subprocess.CalledProcessError):
+            P.git("rev-parse", "--verify", "no-such-ref^{commit}")
+        self.assertIn("publish: git rev-parse failed (exit", out.getvalue())
+        self.assertRegex(out.getvalue(), r"fatal|Needed a single revision|not a git repository")
+
     def test_installed_version_is_reported(self):
         self.assertIsNone(P.installed_version())       # no VERSION file in the repo
         self.assertIn("positions", self.index["meta"])

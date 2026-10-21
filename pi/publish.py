@@ -677,8 +677,15 @@ replaces them. The code that writes it is in
 
 
 def git(*args, env=None):
-    return subprocess.run(["git", *args], cwd=WORK_DIR, env=env, check=True,
-                          timeout=300, capture_output=True, text=True).stdout
+    """Run git in the publish folder. On failure, git's own message goes to the
+    log before the error is raised: on 2026-10-21 every push from noon to
+    3:15 PM failed with exit 128 and the log said only that, because the
+    message was captured and dropped."""
+    r = subprocess.run(["git", *args], cwd=WORK_DIR, env=env, timeout=300, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"publish: git {args[0]} failed (exit {r.returncode}): {(r.stderr or r.stdout).strip()[-800:]}", flush=True)
+        raise subprocess.CalledProcessError(r.returncode, r.args, r.stdout, r.stderr)
+    return r.stdout
 
 
 def write_files(files):
