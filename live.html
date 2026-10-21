@@ -180,6 +180,9 @@
     color:#556; cursor:pointer; font-size:0.9rem; display:none;
   }
   #search-wrap { position:relative; }
+  #search-bar { display:none; align-items:center; justify-content:space-between; gap:8px; margin-top:4px; }
+  #search-bar.on { display:flex; }
+  #search-clear-btn { padding:2px 8px; font-size:0.68rem; }
   #events h3 { margin-top:10px; }
   #events-note { color:#7788aa; font-size:0.65rem; margin-top:3px; }
   /* event markers: shape and text carry the meaning, not colour */
@@ -237,6 +240,8 @@
   #ev-card .row span:last-child { text-align:right; font-variant-numeric:tabular-nums; }
   #ev-card .ac-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   @media (max-width:480px) { #ev-card .ac-grid { grid-template-columns:1fr; } }
+  /* wide enough: the card opens beside the search panel, so the results stay in reach (10-20) */
+  @media (min-width:700px) { #ev-card { left:294px; width:min(380px, calc(100% - 308px)); } }
   #ev-card a { color:#7ec8e3; }
   #ev-card .note { color:#99a; margin-top:6px; }
   #ev-close { position:absolute; top:8px; right:10px; background:none; border:none; color:#aab;
@@ -295,7 +300,7 @@
     <input type="text" id="search-input" placeholder="Flight, type or name (e.g. 737, Osprey, Bonanza)…" autocomplete="off">
     <span id="search-clear" onclick="clearSearch()">✕</span>
   </div>
-  <div id="search-count"></div>
+  <div id="search-bar"><div id="search-count"></div><button class="btn" id="search-clear-btn" onclick="clearSearch()">Clear search</button></div>
   <div id="search-results"></div>
   <div id="events">
     <!--farm--><h3>🦬 Over the farm's land, <span class="view-lbl">last 24 h</span></h3>
@@ -534,6 +539,13 @@ function getDisplayType(code) {
 let searchActive   = false;
 let highlightTypes = null;  // Set of raw type codes to highlight
 let highlightFlights = null; // Set of flight callsigns to highlight
+// What was typed in the search box. While it is set, the results and their
+// highlight stay until "Clear search" (or the ✕, or emptying the box): opening
+// a flight's card, closing it, an event, or the 5-minute refresh keep them
+// (owner, 2026-10-20: "I want the search results to stay until I click on a
+// button that clears the search").
+let searchText = '';
+let selectedResultKey = null;
 
 function matchesSearch(p) {
   if (!searchActive) return true;
@@ -549,7 +561,9 @@ function doSearch(query) {
   if (!query) { clearSearch(); return; }
 
   document.getElementById('search-clear').style.display = 'block';
+  document.getElementById('search-bar').classList.add('on');
   searchActive = true;
+  searchText = query;
   highlightTypes   = new Set();
   highlightFlights = new Set();
 
@@ -565,56 +579,75 @@ function doSearch(query) {
   const nameMatches = typesForName(query);
   nameMatches.forEach(t => highlightTypes.add(t));
 
-  // Check if query matches raw type codes
+  // Type codes match anywhere ("A34" finds A343 and A346). A callsign matches
+  // from its start ("UAL", "UAL28", "N123AB"), or by its flight number when
+  // only digits are typed ("2853" finds UAL2853). An aircraft heard without a
+  // callsign is labelled with its address, which matches only when typed in
+  // full. Matching anywhere inside made "A340" find RPA3401, RPA3409 and the
+  // address A3401A (10-20).
+  const digits = /^\d+$/.test(query);
   ACS.forEach(a => {
     const rawType = (a[1] || '').toUpperCase();
     const flight  = (a[0] || '').toUpperCase();
     if (rawType === query || rawType.includes(query)) highlightTypes.add(rawType);
-    if (flight  === query || flight.includes(query))  highlightFlights.add(flight);
+    const noCallsign = flight === (a[3] || '').toUpperCase();
+    if (noCallsign ? flight === query
+                   : flight.startsWith(query) || (digits && flight.replace(/^\D+/, '').startsWith(query)))
+      highlightFlights.add(flight);
   });
 
-  // Build result list — unique flights matching, first appearance, sorted by time
-  const seen = new Set();
-  const results = [];
-  const hit = ACS.map(a => matchesSearch([0,0,0,0,0,a[0],a[1]]));
-  for (let i = 0; PTS && i < PTS.n; i++) {
-    const a = ACS[PTS.ac[i]];
-    if (!hit[PTS.ac[i]]) continue;
-    const key = a[0] + ':' + a[1];
-    if (seen.has(key)) continue;
-    seen.add(key);
-    results.push({
-      flight:  a[0] || '—',
-      rawType: a[1] || '',
-      dispType: getDisplayType(a[1]),
-      time:    PTS.tmin[i],
-      ap:      PTS.ap[i]
-    });
-  }
-  results.sort((a,b) => a.time - b.time);
-
-  const AP_NAMES_S = {0:'KIAD',1:'KDCA',2:'KBWI',3:'KJYO',4:'KGAI',
-                       5:'KHEF',6:'KRMN',7:'En-route',8:'KADW',9:'KNYG'};
+  const results = searchResults();
   const el = document.getElementById('search-results');
   el.innerHTML = '';
-  results.forEach((r,i) => {
-    const edtMin = utcToEdt(r.time);
-    const timeStr = edtToDisplay(edtMin);
+  results.forEach(r => {
     const div = document.createElement('div');
-    div.className = 'search-result';
-    div.innerHTML = `<span><span class="sr-flight">${r.flight}</span>
-      <span class="sr-type"> · ${r.dispType}</span></span>
-      <span class="sr-time">${timeStr}</span>`;
-    div.onclick = () => selectResult(div, r.time, r.flight, r.rawType);
+    div.className = 'search-result' + (r.key === selectedResultKey ? ' active' : '');
+    div.innerHTML = `<span><span class="sr-flight">${esc(r.flight)}</span>
+      <span class="sr-type"> · ${esc(r.rawType || '?')}</span></span>
+      <span class="sr-time">${edtToDisplay(r.time)}</span>`;
+    div.title = (TYPE_NAMES[r.rawType] || r.rawType || 'type unknown') + ' · address ' + r.hex.toUpperCase() +
+      (r.labels.length > 1 ? ' · also heard without its callsign' : '');
+    div.onclick = () => selectResult(div, r);
     el.appendChild(div);
   });
 
   const seenTypes = new Set(results.map(r => r.rawType));
-  const named = nameMatches.filter(t => seenTypes.has(t)).map(t => t + ' ' + (TYPE_NAMES[t] || '')).slice(0, 3);
+  const named = [...new Set([...highlightTypes].filter(t => seenTypes.has(t)))]
+    .map(t => t + ' ' + (TYPE_NAMES[t] || '')).slice(0, 3);
+  const aircraft = new Set(results.map(r => r.hex)).size;
   document.getElementById('search-count').textContent =
-    (results.length ? results.length + ' flight' + (results.length>1?'s':'') + ' found' : 'No matches') +
+    (results.length ? results.length + ' flight' + (results.length > 1 ? 's' : '') +
+      ' by ' + aircraft + ' aircraft' : 'No matches') +
     (named.length ? ' · ' + named.join(' · ') : '');
   redraw();
+}
+
+// One row per flight. The map keeps an aircraft's stretches without a callsign
+// under its address, so on 10-20 two Lufthansa A340s showed as six "flights";
+// such a stretch joins the same aircraft's nearest flight within 3 hours.
+function searchResults() {
+  const first = new Map();                  // ACS index -> PTS index of its first point
+  for (let i = 0; PTS && i < PTS.n; i++) {
+    const k = PTS.ac[i];
+    if (!first.has(k) && matchesSearch([0,0,0,0,0, ACS[k][0], ACS[k][1]])) first.set(k, i);
+  }
+  const rows = [], loose = [];
+  first.forEach((i, k) => {
+    const a = ACS[k], hex = (a[3] || '').toLowerCase();
+    const row = {key: hex + '|' + a[0], flight: a[0] || '—', hex, rawType: a[1] || '', labels: [a[0]],
+                 time: PTS.tmin[i], firstIdx: i};
+    (a[0] && a[0].toLowerCase() === hex ? loose : rows).push(row);
+  });
+  loose.forEach(l => {
+    let best = null;
+    rows.forEach(r => { if (r.hex === l.hex && Math.abs(r.time - l.time) <= 180 &&
+                            (!best || Math.abs(r.time - l.time) < Math.abs(best.time - l.time))) best = r; });
+    if (!best) { l.flight = 'no callsign (' + l.hex.toUpperCase() + ')'; rows.push(l); return; }
+    best.labels.push(l.labels[0]);
+    if (l.time < best.time) { best.time = l.time; best.firstIdx = l.firstIdx; }
+    best.rawType = best.rawType || l.rawType;
+  });
+  return rows.sort((a, b) => a.time - b.time);
 }
 
 // ── Aircraft type names, for searching by plain name ──────────────────────
@@ -728,30 +761,21 @@ let selectedResultEl = null;
 let pulsePos = null;   // {x, y, lat, lon} of pulsating dot
 let pulseAnim = null;  // requestAnimationFrame handle
 
-function selectResult(el, utcTime, flight, rawType) {
+// A search result: its details card (owner, 2026-10-20: "I want the details of
+// the flight to show up when I click on that flight in the search results"),
+// its whole path, and the timeline set to just before it appears.
+function selectResult(el, r) {
   if (selectedResultEl) selectedResultEl.classList.remove('active');
   selectedResultEl = el;
+  selectedResultKey = r.key;
   el.classList.add('active');
-
-  // Pause playback
   if (playing) togglePlay();
-
-  // Jump to just before this flight appears so trail builds up
-  _curMin = Math.max(0, utcTime - _winMin);
+  _curMin = Math.max(0, r.time - _winMin);
   redraw();
-
-  // Find first point for this flight to place pulse dot
-  let fp = null;
-  for (let i = lowerBound(utcTime - 0.5); i < PTS.n && PTS.tmin[i] <= utcTime + 2; i++) {
-    const a = ACS[PTS.ac[i]];
-    if (a[0] === flight || a[1] === rawType) { fp = getPt(i); break; }
-  }
-  if (fp) {
-    const lp = map.latLngToContainerPoint([fp[0], fp[1]]);
-    pulsePos = {lat: fp[0], lon: fp[1]};
-    startPulse();
-  }
-  showTracks([flight]);
+  const fp = getPt(r.firstIdx);
+  pulsePos = {lat: fp[0], lon: fp[1]};
+  startPulse();
+  openRouteCard(fp, r.labels);
 }
 
 // Dedicated pulse canvas — sits above the main canvas, never conflicts
@@ -821,14 +845,18 @@ function stopPulse() {
 function clearSearch() {
   clearTracks();
   searchActive     = false;
+  searchText       = '';
   highlightTypes   = null;
   highlightFlights = null;
   selectedResultEl = null;
+  selectedResultKey = null;
   stopPulse();
+  document.getElementById('ev-card').hidden = true;
   document.getElementById('search-input').value = '';
   document.getElementById('search-results').innerHTML = '';
   document.getElementById('search-count').textContent = '';
   document.getElementById('search-clear').style.display = 'none';
+  document.getElementById('search-bar').classList.remove('on');
   redraw();
 }
 
@@ -1130,7 +1158,9 @@ map.on('click', function(e) {
   if (playing) return;  // don't show popup while animating
 
   const clickPt = map.latLngToContainerPoint(e.latlng);
-  const pts = getPtsInRange(_curMin - _winMin, _curMin);
+  // while a search is on, only its aircraft answer a tap: the dimmed ones
+  // around them kept opening the wrong flight (10-20)
+  const pts = getPtsInRange(_curMin - _winMin, _curMin).filter(p => !searchText || matchesSearch(p));
   if (!pts.length) return;
 
   // Find nearest point to click within 20px
@@ -1484,7 +1514,7 @@ async function showIndex(idx, live) {
   LAST_EVENTS = Object.assign({}, idx.events, {farm_passes: FARM_MODE && idx.farm ? idx.farm.passes : []});
   drawEvents(LAST_EVENTS);
   drawCategories();
-  if (searchActive) doSearch(document.getElementById('search-input').value); else redraw();
+  if (searchText) doSearch(searchText); else redraw();
 }
 drawLegend();
 // ── Events: emergencies, TCAS advisories, close approaches ─────────────────
@@ -1755,17 +1785,20 @@ function openEventCard(it) {
   const e = it.raw || {};
   const who = (it.kind === 'close' ? [e.a, e.b] : [e]).filter(Boolean)
     .map(x => x.flight || (x.hex || '').toUpperCase());
-  searchActive = true;
-  highlightTypes = new Set();
-  highlightFlights = new Set(who);
-  document.getElementById('search-clear').style.display = 'block';
+  if (!searchText) {                          // a typed search keeps its own highlight
+    searchActive = true;
+    highlightTypes = new Set();
+    highlightFlights = new Set(who);
+    document.getElementById('search-clear').style.display = 'block';
+  }
   showTracks(who);
 }
 // Tapping a dot on a route: the same aircraft details as an event card, for
 // that aircraft at that moment, and its whole path drawn.
 const CAT_LABEL = Object.fromEntries(CATEGORIES.map(c => c[0] === 'helicopter' ? ['helicopter', 'Helicopter'] : c));
-async function openRouteCard(p) {
+async function openRouteCard(p, labels) {
   const label = p[5], type = p[6], hex = p[12] || '';
+  if (searchText && !labels) markResult(hex, label);
   const flight = label && label !== hex.toUpperCase() ? label : '';
   const t = META.start + p[3] * 60;
   const x = {flight, hex, type, type_name: TYPE_NAMES[type], alt: p[8], gs: p[7], track: p[9], vrate: p[10]};
@@ -1781,12 +1814,14 @@ async function openRouteCard(p) {
   };
   draw();
   card.hidden = false;
-  searchActive = true;
-  highlightTypes = new Set();
-  highlightFlights = new Set([label]);
-  document.getElementById('search-clear').style.display = 'block';
+  if (!searchText) {                          // a typed search keeps its own highlight
+    searchActive = true;
+    highlightTypes = new Set();
+    highlightFlights = new Set([label]);
+    document.getElementById('search-clear').style.display = 'block';
+  }
   redraw();
-  showTracks([flight, hex]);
+  showTracks([flight, hex, ...(labels || [])]);
   const op = await operatorFor(flight);
   if (op && !card.hidden && body.querySelector('h4') && body.querySelector('h4').textContent.startsWith('✈ ' + (flight || hex.toUpperCase()))) {
     x.operator = op[0]; x.operator_radio = op[2]; draw();
@@ -1794,7 +1829,22 @@ async function openRouteCard(p) {
 }
 function closeEventCard() {
   document.getElementById('ev-card').hidden = true;
-  clearSearch();
+  if (!searchText) { clearSearch(); return; }
+  clearTracks();                              // the search and its results stay
+  stopPulse();
+  if (selectedResultEl) selectedResultEl.classList.remove('active');
+  selectedResultEl = null;
+  selectedResultKey = null;
+  redraw();
+}
+// A tapped dot that is one of the search results: mark its row.
+function markResult(hex, label) {
+  const rows = searchResults(), list = document.getElementById('search-results').children;
+  const i = rows.findIndex(r => r.hex === (hex || '').toLowerCase() && r.labels.includes(label));
+  if (selectedResultEl) selectedResultEl.classList.remove('active');
+  selectedResultEl = i >= 0 && list[i] ? list[i] : null;
+  selectedResultKey = i >= 0 ? rows[i].key : null;
+  if (selectedResultEl) { selectedResultEl.classList.add('active'); selectedResultEl.scrollIntoView({block: 'nearest'}); }
 }
 
 function drawEvents(ev) {
