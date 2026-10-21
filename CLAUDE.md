@@ -22,7 +22,7 @@ day picker for 30 days), `flights.html` (the same without the farm, built by
 `tools/make_public.py`), `heat.html` (history: near = 50 mi under 15,000 ft
 with wind/airport/take-off choices; Wide = 200 mi, every height, radio beacons).
 
-**Tests:** `python3 -m unittest discover -s tests -v` (30 tests, ~25 s;
+**Tests:** `python3 -m unittest discover -s tests -v` (31 tests, ~25 s;
 the page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`
 and `LEAFLET_DIST=<leaflet dist folder>` when there is no network). They run on
 every PR and push (`.github/workflows/tests.yml`). `tests/fixture.py` is a
@@ -74,6 +74,11 @@ From a cloud session, the published data can be read directly:
 `https://raw.githubusercontent.com/RDBFarm/iad-map/live-data/live.json`
 (counts, weather, events, farm passes, hour-file and track-file lists).
 The Pi itself can't be reached from outside the farm.
+
+### Upload outage 10-21 (noon – 3:15 PM EDT)
+- Every push from the 12:00 run failed (`git push` exit 128); the receiver kept logging. Checked from the Pi with him: `https://github.com` reachable (200), the deploy key authenticates (`git push --dry-run` → "Everything up-to-date"), drive 11% full, `~/netwatch.log` with no failure since 09-28. GitHub had an incident open from 14:52 UTC ("Delays for Pull Requests and Webhook deliveries"; Actions/webhooks recovered ~17:09 UTC), but listed Git Operations as working, the Pi had pushed fine at 11:45 (an hour into it) and was still failing at 15:01 EDT. **Cause not established.** It recovered by itself at the 15:15 run, and the missed hours (16–18 UTC) were filled in automatically at normal size: the publisher rebuilds the 24 h window from the log every run, so an outage loses nothing that the log has.
+- The log said only "exit status 128" because `publish.git()` captured git's stderr and dropped it. **Since 10-21 it prints git's message before raising** (`publish: git push failed (exit 128): ...`); read that first next time: `journalctl -u iad-map-publish -n 20 --no-pager`.
+- Not the farm network: he could see the Pi's own tar1090 map through the same HubDuos (my first guess blamed the Stables HubDuo; he pointed out that couldn't be). The `pi` checks above need no change to anything; a hand push of an old attempt's commits would overwrite newer data until the next run, so don't, once uploads resume.
 
 ### Things that cost time on 09-23/24
 - The deploy key was first added to **rdbf-app** instead of iad-map, giving
