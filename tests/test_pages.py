@@ -92,6 +92,34 @@ class Pages(unittest.TestCase):
             self.assertLessEqual(pg.evaluate("document.documentElement.scrollWidth"), width)
             pg.close()
 
+    def test_search_matches_stays_and_opens_the_card(self):
+        pg, errors = self.open("live.html")
+        rows = "document.querySelectorAll('#search-results .search-result').length"
+        pg.fill("#search-input", "L10")             # inside a callsign only: no longer a match
+        pg.wait_for_timeout(300)
+        self.assertEqual(pg.evaluate(rows), 0)
+        pg.fill("#search-input", "101")             # a flight number alone finds UAL101
+        pg.wait_for_timeout(300)
+        self.assertIn("UAL101", pg.inner_text("#search-results"))
+        pg.fill("#search-input", "B739")
+        pg.wait_for_timeout(300)
+        n = pg.evaluate(rows)
+        self.assertGreater(n, 1)
+        self.assertIn(f"{n} flights by", pg.inner_text("#search-count"))
+        pg.click("#search-results .search-result >> nth=1")
+        pg.wait_for_timeout(500)
+        self.assertFalse(pg.evaluate("document.getElementById('ev-card').hidden"), "a result opens its card")
+        self.assertIn("UAL", pg.inner_text("#ev-body h4"))
+        self.assertEqual(pg.evaluate(rows), n, "the results stay while the card is open")
+        pg.click("#ev-close")
+        pg.wait_for_timeout(300)
+        self.assertEqual(pg.evaluate(rows), n, "and after it is closed")
+        pg.click("#search-clear-btn")
+        pg.wait_for_timeout(300)
+        self.assertEqual(pg.evaluate(rows), 0)
+        self.assertEqual(errors, [])
+        pg.close()
+
     def test_public_page_has_no_farm(self):
         pg, errors = self.open("flights.html")
         self.assertEqual(errors, [])
