@@ -1,0 +1,23 @@
+{
+ "title": "\ud83d\udea8 7700 BAW291 (British Airways) B772 \u2014 general emergency",
+ "body": "@RDBFarm \u2014 heard by the farm receiver at 2026-10-22 20:53:20 UTC.\n\n- **Squawk:** 7700 (general emergency)\n- **ADS-B emergency status:** general emergency\n- **Flight:** BAW291 \u2014 British Airways (radio callsign SPEEDBIRD)\n- **Aircraft:** registration G-YMMU, type B772 (BOEING 777-200), ICAO 405BFE\n- **Position:** 41.2997, -77.6976 \u2014 129 nm from the farm, bearing 355\u00b0\n- **Altitude:** 28,000 ft; **speed** 534 kt; **track** 210\u00b0\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=405bfe) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=405bfe) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`. A squawk can be set by mistake and corrected within seconds; this confirms only that the code was seen on 3 reads in a row._",
+ "event": {
+  "t": 1792702400,
+  "utc": "2026-10-22 20:53:20",
+  "hex": "405bfe",
+  "flight": "BAW291",
+  "type": "B772",
+  "code": "7700",
+  "emergency": "general",
+  "squawk": "7700",
+  "lat": 41.299656,
+  "lon": -77.697622,
+  "alt": 28000,
+  "gs": 534.2,
+  "track": 210.36,
+  "mlat": 0,
+  "dist_nm": 129.4,
+  "bearing": 355.2,
+  "pushed": true
+ }
+}
