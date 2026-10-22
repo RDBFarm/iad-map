@@ -120,6 +120,29 @@ class Pages(unittest.TestCase):
         self.assertEqual(errors, [])
         pg.close()
 
+    def test_events_training_jets_hidden_and_hide_button_on_top(self):
+        pg, errors = self.open("live.html")
+        pg.wait_for_function("Object.keys(TYPE_DESC).length > 0")
+        js = """(() => {
+          NOTABLE['ae0001'] = [['Training Wheels', 'Bicycle Made For Two'], 'Northrop T-38 Talon', 'USAF', '', ''];
+          const ac = (hex, flight, type, lat) => ({hex, flight, type, lat, lon: -77.4, alt: 9000, gs: 300, track: 90});
+          const close = (a, b) => ({a, b, cpa_t: META.end - 600, start: META.end - 610, end: META.end - 590, h_nm: 0.4, v_ft: 200, closing_kt: 120, limit_nm: 0.33, flags: []});
+          const ev = {close_approaches: [close(ac('ae0001', 'RO01', 'T38', 39.0), ac('ae0002', 'RO02', 'T38', 39.001)),
+                                         close(ac('a00001', 'UAL1', 'B738', 39.2), ac('a00002', 'DAL2', 'A321', 39.201))]};
+          const r = eventItems(ev);
+          openEventCard(r.items[0]);
+          const body = document.getElementById('ev-body');
+          return {training: r.training, shown: r.items.map(i => i.label),
+                  afterTitle: body.querySelector('h4').nextElementSibling.querySelector('#ev-hide') !== null};
+        })()"""
+        r = pg.evaluate(js)
+        self.assertEqual(r["training"], 1, "the T-38 pair is not shown")
+        self.assertEqual(len(r["shown"]), 1)
+        self.assertIn("UAL1", r["shown"][0])
+        self.assertTrue(r["afterTitle"], "the hide button is right under the card's title")
+        self.assertEqual(errors, [])
+        pg.close()
+
     def test_public_page_has_no_farm(self):
         pg, errors = self.open("flights.html")
         self.assertEqual(errors, [])
