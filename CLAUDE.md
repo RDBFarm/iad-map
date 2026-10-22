@@ -23,7 +23,7 @@ day picker for 30 days), `flights.html` (the same without the farm, built by
 `tools/make_public.py`), `heat.html` (history: near = 50 mi under 15,000 ft
 with wind/airport/take-off choices; Wide = 200 mi, every height, radio beacons).
 
-**Tests:** `python3 -m unittest discover -s tests -v` (34 tests, ~25 s;
+**Tests:** `python3 -m unittest discover -s tests -v` (36 tests, ~30 s;
 the page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`
 and `LEAFLET_DIST=<leaflet dist folder>` when there is no network). They run on
 every PR and push (`.github/workflows/tests.yml`). `tests/fixture.py` is a
@@ -253,6 +253,10 @@ See `README.md` for how to install. In short:
 - **Sticky:** `searchText` holds the typed search; results and highlight stay until "Clear search" (button beside the count), the ✕, or emptying the box. Opening a card, closing it, an event, or the 5-minute refresh keep them. (Before: tapping a dot replaced the highlight and closing the card wiped the search; the refresh also cleared an open card's highlight when the box was empty.)
 - **Clicking a result** opens its details card (the dot card), draws its whole path, and sets the timeline just before it appears. From 700 px wide the card opens beside the search panel (`left:294px`), so the list stays in reach.
 - **Taps while a search is on** consider only the searched aircraft, so the dimmed traffic around them can't open the wrong card; a tapped result's row is highlighted. Test: `test_search_matches_stays_and_opens_the_card`.
+
+### Event cards (10-22, his requests)
+- "have the events log detail screen (like when there is a close call) to have the button to ignore it moved to the top instead of the bottom": "Hide from the map" now sits right under the card's title (`openEventCard`, `.ev-actions`).
+- "if there is a 'Training Wheels' event, to just ignore it altogether": "Training Wheels" is plane-alert-db's tag for military training aircraft (1,438 in `notable.json`: T-38s, T-6s, gliders; 859 USAF), and the ★ label shows a notable aircraft's first tag. A **close approach** with such an aircraft is not shown (`isTraining` in `eventItems`), counted in the events note as "involving military training jets not shown"; still logged on the Pi. In the 23 days to 10-17 there were 11 (3 with both aircraft training jets, e.g. T-38 pairs RO01/RO02, CC01/SP02, JR01/JR02), and **no emergencies or farm passes** by one, so those are left as they were: a 7700 from a training jet would still show. Test: `test_events_training_jets_hidden_and_hide_button_on_top`.
 
 ### Public page and icon (09-26, his requests)
 - **`flights.html` is the live map without the farm** (his words: "a duplicate website but without the farm relevant data"). Built from `live.html` by `tools/make_public.py`: sets `FARM_MODE = false`, empties `PARCELS` (it carried the address), and drops the HTML between `<!--farm-->` markers: over-the-farm summary, 📍 Near the farm, "RDBF receiver". With `FARM_MODE` off there are no low passes, no "From the farm" or height-above-your-ground rows. **Edit `live.html` only, then run `python3 tools/make_public.py`**; the `Public page up to date` workflow fails otherwise. Anything new about the farm in `live.html` needs a marker or a `FARM_MODE` guard.

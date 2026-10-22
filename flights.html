@@ -234,6 +234,7 @@
     border:1px solid rgba(255,255,255,0.15); border-radius:10px; padding:12px 14px; font-size:0.74rem;
     color:#dde; line-height:1.45; }
   #ev-card h4 { font-size:0.85rem; color:#fff; margin:0 26px 8px 0; }
+  #ev-card .ev-actions { margin:0 0 8px; }
   #ev-card h5 { font-size:0.74rem; color:#aab; margin:10px 0 4px; text-transform:uppercase; letter-spacing:0.05em; }
   #ev-card .row { display:flex; justify-content:space-between; gap:10px; padding:2px 0;
     border-bottom:1px solid rgba(255,255,255,0.05); }
@@ -1554,7 +1555,13 @@ function eventItems(ev) {
   // at nearly its speed (within 30%) is almost always that aircraft's own
   // radar return: 11 of the 13 such pairs in the first 35 h, 0.01-0.1 nm
   // apart. It is hidden here, still logged on the Pi.
-  let hidden = 0, noJet = 0, echoes = 0;
+  // Military training jets (owner, 2026-10-22: if there is a "Training Wheels"
+  // event, "just ignore it altogether"): a close approach with an aircraft
+  // plane-alert-db tags "Training Wheels" (T-38s, T-6s and the like flying in
+  // pairs) is not shown. 11 such in the 23 days to 10-17, none of them
+  // emergencies or passes over the farm. Still logged on the Pi.
+  let hidden = 0, noJet = 0, echoes = 0, training = 0;
+  const isTraining = x => !!x && ((notableOf(x.hex) || [[]])[0] || []).includes('Training Wheels');
   const isJet = x => ((TYPE_DESC[x && x.type] || '')[2] === 'J');
   const isEcho = (a, b) => {
     if (!(String(a.hex).startsWith('~') || String(b.hex).startsWith('~'))) return false;
@@ -1565,6 +1572,7 @@ function eventItems(ev) {
   const whoOf = x => (x.flight || String(x.hex).toUpperCase()) + (starName(x.hex) ? ' ' + starName(x.hex) : '');
   (ev.close_approaches || []).forEach(e => {
     const f = e.flags || [];
+    if (isTraining(e.a) || isTraining(e.b)) { training++; return; }
     if (!f.includes('tcas') && isEcho(e.a, e.b)) { echoes++; return; }
     if (!f.includes('tcas') && (f.includes('near_airport') || f.includes('persistent') || f.includes('low'))) { hidden++; return; }
     if (!isJet(e.a) && !isJet(e.b)) { noJet++; return; }
@@ -1584,7 +1592,7 @@ function eventItems(ev) {
         (p.type ? ' (' + p.type + ')' : ' (type unknown)')});
   });
   items.sort((a, b) => b.t - a.t);
-  return {items, hidden, noJet, echoes};
+  return {items, hidden, noJet, echoes, training};
 }
 
 function jumpToEvent(it) {
@@ -1759,8 +1767,10 @@ function eventCardHtml(it) {
 }
 function openEventCard(it) {
   const key = eventKey(it), isHidden = hiddenEvents.has(key);
-  document.getElementById('ev-body').innerHTML = eventCardHtml(it) +
-    `<div class="note"><button class="btn" id="ev-hide">${isHidden ? 'Show on the map again' : 'Hide from the map'}</button></div>`;
+  // the hide button sits at the top, under the title (owner, 2026-10-22), not after the details
+  const html = eventCardHtml(it), cut = html.indexOf('</h4>') + 5;
+  const hideBtn = `<div class="ev-actions"><button class="btn" id="ev-hide">${isHidden ? 'Show on the map again' : 'Hide from the map'}</button></div>`;
+  document.getElementById('ev-body').innerHTML = cut > 4 ? html.slice(0, cut) + hideBtn + html.slice(cut) : hideBtn + html;
   document.getElementById('ev-hide').onclick = () => {
     if (isHidden) hiddenEvents.delete(key); else hiddenEvents.add(key);
     saveHidden();
@@ -1836,7 +1846,7 @@ function markResult(hex, label) {
 
 function drawEvents(ev) {
   eventLayer.clearLayers();
-  const all = eventItems(ev || {}), hidden = all.hidden, noJet = all.noJet, echoes = all.echoes;
+  const all = eventItems(ev || {}), hidden = all.hidden, noJet = all.noJet, echoes = all.echoes, training = all.training;
   const dismissed = all.items.filter(it => hiddenEvents.has(eventKey(it)));
   const items = showDismissed ? all.items : all.items.filter(it => !hiddenEvents.has(eventKey(it)));
   const list = document.getElementById('events-list');
@@ -1860,6 +1870,7 @@ function drawEvents(ev) {
   note.textContent = (items.length ? '' : 'None. ') +
     (hidden ? hidden + ' close approach' + (hidden > 1 ? 'es' : '') + ' at airports, in formation or low-level not shown. ' : '') +
     (noJet ? noJet + ' with no jet involved not shown. ' : '') +
+    (training ? training + ' involving military training jets not shown. ' : '') +
     (echoes ? echoes + ' radar echo' + (echoes > 1 ? 'es' : '') + ' of a single aircraft not shown. ' : '');
   if (dismissed.length) {
     const a = document.createElement('a');
