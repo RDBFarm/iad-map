@@ -102,6 +102,14 @@ Still open: runway headings are runway numbers (magnetic) while ADS-B track
 is true north, and KIAD is listed as 19/199. Not yet checked against
 published true bearings; to be looked at with real traffic.
 
+## Network check
+
+`pi/netcheck.py` runs every 5 minutes as root. When the Pi can't look up
+internet addresses it records what still works (router, internet by number,
+which name servers answer) in `events/netcheck.jsonl`, and after 15 minutes it
+renews the network connection, at most hourly. On the Pi:
+`python3 /opt/iad-map/netcheck.py --status`.
+
 ## Tests
 
     python3 -m unittest discover -s tests -v

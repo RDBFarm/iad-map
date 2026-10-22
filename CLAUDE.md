@@ -14,7 +14,8 @@ than assuming.
 every 2 s), `iad-map-alerts` (emergency squawks, low passes, sightings → GitHub
 issue + text message), `iad-map-publish.timer` (every 15 min → `live-data`:
 the live map, 30 days of hours, both history heat maps), `iad-map-aircraft-db.timer`
-(monthly type lookup). Each upload carries the installed version in
+(monthly type lookup), `iad-map-netcheck.timer` (every 5 min, from 10-22: name
+lookups, diagnosis, self-renewal; see "Lookup outage"). Each upload carries the installed version in
 `live.json` `meta.pi_version` (from 10-18; written by the installer).
 
 **Pages** (GitHub Pages, from `main`): `live.html` (75 miles, under 15,000 ft;
@@ -22,7 +23,7 @@ day picker for 30 days), `flights.html` (the same without the farm, built by
 `tools/make_public.py`), `heat.html` (history: near = 50 mi under 15,000 ft
 with wind/airport/take-off choices; Wide = 200 mi, every height, radio beacons).
 
-**Tests:** `python3 -m unittest discover -s tests -v` (31 tests, ~25 s;
+**Tests:** `python3 -m unittest discover -s tests -v` (34 tests, ~25 s;
 the page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`
 and `LEAFLET_DIST=<leaflet dist folder>` when there is no network). They run on
 every PR and push (`.github/workflows/tests.yml`). `tests/fixture.py` is a
@@ -79,6 +80,12 @@ The Pi itself can't be reached from outside the farm.
 - Every push from the 12:00 run failed (`git push` exit 128); the receiver kept logging. Checked from the Pi with him: `https://github.com` reachable (200), the deploy key authenticates (`git push --dry-run` → "Everything up-to-date"), drive 11% full, `~/netwatch.log` with no failure since 09-28. GitHub had an incident open from 14:52 UTC ("Delays for Pull Requests and Webhook deliveries"; Actions/webhooks recovered ~17:09 UTC), but listed Git Operations as working, the Pi had pushed fine at 11:45 (an hour into it) and was still failing at 15:01 EDT. **Cause not established.** It recovered by itself at the 15:15 run, and the missed hours (16–18 UTC) were filled in automatically at normal size: the publisher rebuilds the 24 h window from the log every run, so an outage loses nothing that the log has.
 - The log said only "exit status 128" because `publish.git()` captured git's stderr and dropped it. **Since 10-21 it prints git's message before raising** (`publish: git push failed (exit 128): ...`); read that first next time: `journalctl -u iad-map-publish -n 20 --no-pager`.
 - Not the farm network: he could see the Pi's own tar1090 map through the same HubDuos (my first guess blamed the Stables HubDuo; he pointed out that couldn't be). The `pi` checks above need no change to anything; a hand push of an old attempt's commits would overwrite newer data until the next run, so don't, once uploads resume.
+
+### Lookup outage 10-21 6:30 PM – 10-22 9:25 AM, and the network check (10-22)
+- **Cause found this time (git's message, logged since #76):** `ssh: Could not resolve hostname github.com: Temporary failure in name resolution`. The whole Pi couldn't look up names: the ADS-B Exchange feed and MLAT logged the same until 09:24:30. The Pi stayed reachable on the farm network the whole time (he SSH'd in from 192.168.1.166). Very likely the 10-21 noon outage too.
+- **NetworkManager logged nothing from 17:30 to 09:24:59**, then `dhcp4 (eth0): state changed new lease`, then at 09:26:27 `set 'Wired connection 1' (eth0) as default for IPv6 routing and DNS`; lookups worked from then (`getent hosts github.com` → 140.82.114.3; router and 1.1.1.1 ping fine). He restarted nothing. **Both outages ended within minutes of him logging in to the Pi** (10-21 ~3:10 PM, 10-22 ~9:20 AM); a clue, not a cause. Name servers before: `192.168.1.1` (the Fios router) and its IPv6 `2600:4040:27d7:ef00::1`, search `mynetworksettings.com`.
+- **Backup name servers, set by hand 10-22** (his "happy to add whatever it takes"): `sudo nmcli connection modify "Wired connection 1" ipv4.ignore-auto-dns yes ipv4.dns "192.168.1.1 1.1.1.1 8.8.8.8" && sudo nmcli device reapply eth0`. NetworkManager then showed IP4.DNS 192.168.1.1, 1.1.1.1, 8.8.8.8 (router first, so local names still resolve). Undo: `sudo nmcli connection modify "Wired connection 1" ipv4.ignore-auto-dns no ipv4.dns "" && sudo nmcli device reapply eth0`. Not in the installer (it edits the farm's network profile; done once by hand).
+- **`pi/netcheck.py`** (root, `iad-map-netcheck.timer`, every 5 min): looks up github.com; when that fails, records to `events/netcheck.jsonl` whether the router and 1.1.1.1 answer a ping, which name servers answer a question sent straight to them (each in resolv.conf, NetworkManager's list, 1.1.1.1), and the default routes; after 3 failures in a row (15 min) renews the connection (`nmcli connection up`), at most hourly, and records whether lookups came back; records the recovery with its length. Read on the Pi: `python3 /opt/iad-map/netcheck.py --status`. The point: the next outage explains itself without anyone logging in.
 
 ### Things that cost time on 09-23/24
 - The deploy key was first added to **rdbf-app** instead of iad-map, giving

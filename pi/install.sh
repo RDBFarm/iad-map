@@ -55,7 +55,7 @@ mkdir -p "$HOME_DIR" "$DATA_DIR" /opt/iad-map
 chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR" "$DATA_DIR"
 
 echo "== Downloading the programs"
-for f in collector.py publish.py proximity.py farm.py alerts.py aircraft_lookup.py tracks.py heatmap.py aircraft_types.json operators.json watch.json watch_flights.json; do
+for f in collector.py publish.py proximity.py farm.py alerts.py aircraft_lookup.py tracks.py heatmap.py netcheck.py aircraft_types.json operators.json watch.json watch_flights.json; do
   curl -fsSL "$SRC/$f" -o "/opt/iad-map/$f"
 done
 chmod 755 /opt/iad-map/*.py; chmod 644 /opt/iad-map/*.json
@@ -145,6 +145,30 @@ Persistent=true
 WantedBy=timers.target
 UNIT
 
+# Runs as root: renewing the network settings needs it (netcheck.py, 10-22).
+cat > /etc/systemd/system/iad-map-netcheck.service <<UNIT
+[Unit]
+Description=IAD map: check the Pi can look up addresses; renew the network after 15 minutes without
+After=network.target
+RequiresMountsFor=/mnt/flightdata
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/iad-map/netcheck.py
+UNIT
+
+cat > /etc/systemd/system/iad-map-netcheck.timer <<UNIT
+[Unit]
+Description=IAD map: network check every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+UNIT
+
 echo "== Measuring the farm's ground elevation (USGS), once"
 if [ ! -f "$DATA_DIR/farm_ground.json" ]; then
   sudo -u "$USER_NAME" python3 /opt/iad-map/farm.py --ground || echo "   USGS elevation failed; using ~380 ft from the notes until it succeeds (re-run the installer)"
@@ -156,7 +180,7 @@ echo "== Building the aircraft type lookup (downloads about 8 MB)"
 sudo -u "$USER_NAME" python3 /opt/iad-map/aircraft_lookup.py --build || echo "   lookup build failed; types will be missing until it succeeds"
 
 systemctl daemon-reload
-systemctl enable --now iad-map-collector.service iad-map-aircraft-db.timer
+systemctl enable --now iad-map-collector.service iad-map-aircraft-db.timer iad-map-netcheck.timer
 systemctl enable iad-map-publish.timer iad-map-alerts.service
 # On a re-run, restart what is already running so it picks up the new programs.
 systemctl try-restart iad-map-collector.service iad-map-alerts.service
