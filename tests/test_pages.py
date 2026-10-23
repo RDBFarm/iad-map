@@ -224,10 +224,8 @@ class Pages(unittest.TestCase):
             self.assertEqual(len(rows), 7)
             cell = lambda r, b: rows[r].query_selector_all("td")[b + 1].inner_text()
             south, north = cell(1, 2), cell(5, 2)          # tomorrow's afternoon, and five days on
-            self.assertIn("lands S", south)
-            self.assertIn("lands N", north)
-            self.assertGreater(int(south.split()[0]), 40)
-            self.assertLess(int(north.split()[0]), 10)
+            self.assertGreater(int(south), 40)      # just the number; the hour taps give the wind
+            self.assertLess(int(north), 10)
             self.assertLessEqual(pg.evaluate("document.documentElement.scrollWidth"), width)
             rows[2].click()
             self.assertIn("planes", pg.inner_text("#fc-day-title"))

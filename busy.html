@@ -54,7 +54,6 @@
   table.fc td { text-align:center; padding:3px; }
   table.fc td:first-child { text-align:left; padding-left:4px; }
   .chip { display:block; border-radius:6px; padding:4px 2px; font-variant-numeric:tabular-nums; font-weight:600; }
-  table.fc td .chip small { color:inherit; opacity:0.8; font-weight:400; }
   @media (max-width:640px) {
     #hdr { gap:8px; padding:8px 10px; }
     #hdr .sub { display:none; }
@@ -408,13 +407,11 @@ function buildForecast(om) {
 }
 const dayLabel = (d, i) => (i === 0 ? 'Today' : WD[d.wd]) + ' ' + fmtDay(d.date).replace(/^\w+ /, '');
 const textOn = c => (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) > 140 ? '#111' : '#fff';
-const lands = p => p >= 0.7 ? 'lands S' : p <= 0.3 ? 'lands N' : 'S or N';
 const hourSpan = h => `${h % 12 || 12}${h < 12 ? 'a' : 'p'}–${(h + 1) % 12 || 12}${h + 1 < 12 || h + 1 === 24 ? 'a' : 'p'}`;
 function drawFcBlocks() {
   const sums = FCDAYS.map(d => BLOCKS.map(([a, b]) => {
     const hs = d.hours.slice(a, b).filter(Boolean);
-    return hs.length ? {exp: hs.reduce((s, x) => s + x.exp, 0), p: hs.reduce((s, x) => s + x.p, 0) / hs.length,
-                        from: hs.length < b - a ? hs[0].t : null} : null;
+    return hs.length ? {exp: hs.reduce((s, x) => s + x.exp, 0), from: hs.length < b - a ? hs[0].t : null} : null;
   }));
   const top = Math.max(1, ...sums.flat().filter(Boolean).map(x => x.exp));
   const tb = document.getElementById('fc-blocks'); tb.innerHTML = '';
@@ -426,7 +423,7 @@ function drawFcBlocks() {
       const c = viridis(Math.pow(x.exp / top, 0.8));
       return `<td><span class="chip" style="background:rgb(${c.join(',')});color:${textOn(c)}"` +
         (x.from ? ` title="From ${hourSpan(et(x.from).hour).split('–')[0]}"` : '') +
-        `>${Math.round(x.exp)}<small>${lands(x.p)}</small></span></td>`;
+        `>${Math.round(x.exp)}</span></td>`;
     }).join('');
     tr.onclick = () => { FCSEL = i; drawForecast(); };
     tb.appendChild(tr);
