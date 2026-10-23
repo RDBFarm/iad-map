@@ -45,6 +45,13 @@
   .about-box p { margin-bottom:10px; }
   .about-close { position:absolute; top:10px; right:12px; background:none; border:none; color:#aab; font-size:1.1rem; cursor:pointer; }
   .tablewrap { overflow-x:auto; }
+  .panel h3 { font-size:0.8rem; color:#dde; margin:12px 0 4px; }
+  table.fc th { text-align:center; line-height:1.25; }
+  table.fc th small, table.fc td small { display:block; font-weight:400; color:#99a; font-size:0.66rem; }
+  table.fc td { text-align:center; padding:3px; }
+  table.fc td:first-child { text-align:left; padding-left:4px; }
+  .chip { display:block; border-radius:6px; padding:4px 2px; font-variant-numeric:tabular-nums; font-weight:600; }
+  table.fc td .chip small { color:inherit; opacity:0.8; font-weight:400; }
   @media (max-width:640px) {
     #hdr { gap:8px; padding:8px 10px; }
     #hdr .sub { display:none; }
@@ -54,6 +61,7 @@
     main { padding:10px 10px 30px; }
     th, td { padding:5px 4px; font-size:0.72rem; }
     .days { display:none; }       /* the count of days is in the chart's note */
+    table.fc th, table.fc td { padding:3px 2px; }
   }
 </style>
 </head>
@@ -69,6 +77,22 @@
 </div>
 
 <main>
+  <div class="panel farm" id="fc-panel">
+    <h2>Over the farm, the next 7 days</h2>
+    <div class="note" id="fc-note">Loading the wind forecast…</div>
+    <div class="tablewrap"><table class="fc">
+      <thead><tr><th></th><th>Night<small>12–6a</small></th><th>Morning<small>6a–12p</small></th><th>Afternoon<small>12–6p</small></th><th>Evening<small>6p–12a</small></th></tr></thead>
+      <tbody id="fc-blocks"></tbody>
+    </table></div>
+    <h3>Hour by hour</h3>
+    <div class="note">Brighter is more planes. Tap a day to chart it.</div>
+    <canvas id="fc-grid" aria-label="Planes expected over the farm each hour, next 7 days"></canvas>
+    <div id="fc-tip"></div>
+    <h3 id="fc-day-title"></h3>
+    <canvas id="fc-bars" aria-label="Planes expected over the farm each hour of the chosen day"></canvas>
+    <div class="key"><span><span class="sw" style="background:rgb(230,159,0)"></span>Planes expected</span><span>➤ wind, blowing this way (knots)</span></div>
+  </div>
+
   <div class="panel">
     <div class="row"><span class="lbl">Show</span>
       <button class="btn on" data-kind="ad">Landings + take-offs</button><button class="btn" data-kind="a">Landings</button><button class="btn" data-kind="d">Take-offs</button>
@@ -114,6 +138,8 @@
       counted in the quarter-hour it happens, Eastern time.</p>
     <p><b>Averages.</b> Each day of the week is the average of the days of that weekday in the period; "Every day" is the
       average of all of them. Only whole days are used.</p>
+    <p class="farm"><b>The farm forecast.</b> <span id="fc-about">Counts planes passing within 2 miles of the farm below
+      6,000 ft.</span></p>
     <p><b>How good is it?</b> About 450 landings and 440 take-offs a day were found in the first four weeks, 91% with airline
       callsigns. The counts haven't been checked against official Dulles figures, so treat them as approximate; the busy
       times don't depend on the exact totals. Aircraft the receiver doesn't hear low near Dulles aren't counted.</p>
@@ -124,7 +150,10 @@
 <script>
 // Counts from pi/busy.py (busy.json on the live-data branch), or busy-seed.json
 // in this repository until the Pi has published its own (tools/make_busy.py).
-if (/flights\.html/.test(document.referrer)) document.getElementById('back').href = 'flights.html';
+// busy.html?public (the link from flights.html) leaves the farm off, as flights.html does
+const PUBLIC = new URLSearchParams(location.search).has('public');
+if (PUBLIC || /flights\.html/.test(document.referrer)) document.getElementById('back').href = 'flights.html';
+if (PUBLIC) document.querySelectorAll('.farm').forEach(e => e.remove());
 const DATA_BASE = (new URLSearchParams(location.search).get('data') ||
   'https://raw.githubusercontent.com/RDBFarm/iad-map/live-data/').replace(/\/?$/, '/');
 const DAYS = ['Every day', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -296,6 +325,175 @@ async function load() {
                              : 'Counted by the farm\'s receiver, updated as each hour ends. ') +
     `${n} whole day${n === 1 ? '' : 's'} recorded.`;
   render();
+  if (!PUBLIC) loadForecast();
+}
+
+// ---- The farm forecast. Dulles's usual landings for each hour (above) times
+// the share that pass over the farm for the way it is likely to be landing,
+// from the forecast wind at Dulles. The numbers are measured by
+// tools/make_farm_model.py (farm-model.json); the wind is Open-Meteo's, the
+// same forecast the farm's records site uses.
+const FC_URL = 'https://api.open-meteo.com/v1/forecast?latitude=38.9445&longitude=-77.4558' +
+  '&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=kn&timezone=America%2FNew_York&timeformat=unixtime&forecast_days=7';
+const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const BLOCKS = [[0, 6], [6, 12], [12, 18], [18, 24]];
+const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+let MODEL = null, FCDAYS = null, FCSEL = 0;
+// Eastern time whatever the viewer's own zone
+const ET = new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', year: 'numeric', month: '2-digit',
+  day: '2-digit', hour: '2-digit', hourCycle: 'h23', weekday: 'short'});
+function et(t) {
+  const p = {}; ET.formatToParts(new Date(t * 1000)).forEach(x => p[x.type] = x.value);
+  return {date: `${p.year}-${p.month}-${p.day}`, hour: +p.hour % 24, wd: WD.indexOf(p.weekday)};
+}
+// Dulles's average landings per hour, by weekday, over the last 4 weeks' whole days
+function usualLandings() {
+  const days = DATA.complete_days.slice(-28), sum = WD.map(() => new Array(24).fill(0)), n = WD.map(() => 0);
+  days.forEach(d => { const c = DATA.days[d]; if (!c) return; const w = weekday(d); n[w]++;
+    for (let q = 0; q < 96; q++) sum[w][q >> 2] += c.a[q]; });
+  const N = n.reduce((a, b) => a + b, 0), all = new Array(24).fill(0);
+  sum.forEach(s => s.forEach((x, h) => all[h] += x));
+  // a weekday with no whole day yet takes every day's average
+  return sum.map((s, w) => n[w] ? s.map(x => x / n[w]) : N ? all.map(x => x / N) : null);
+}
+function pSouth(dir, kt) {
+  const u = kt < 0.5 ? 0 : kt * Math.cos((dir - MODEL.axis_deg) * Math.PI / 180);   // knots blowing up the runways from the south
+  const b = MODEL.p_south.find(x => (x.from_kt == null || u >= x.from_kt) && (x.to_kt == null || u < x.to_kt));
+  return b && b.p != null ? b.p : 0.5;
+}
+function buildForecast(om) {
+  const hr = om.hourly, now = Date.now() / 1000, usual = usualLandings(), days = [];
+  hr.time.forEach((t, i) => {
+    const e = et(t);
+    let d = days.find(x => x.date === e.date);
+    if (!d) { d = {date: e.date, wd: e.wd, hours: new Array(24).fill(null)}; days.push(d); }
+    const dir = hr.wind_direction_10m[i], kt = hr.wind_speed_10m[i];
+    if (t + 3600 <= now || dir == null || kt == null || !usual) return;
+    const p = pSouth(dir, kt), exp = usual[e.wd][e.hour] * (p * MODEL.share.S + (1 - p) * MODEL.share.N);
+    const prev = d.hours[e.hour];          // the hour that happens twice when the clocks go back
+    d.hours[e.hour] = prev ? {...prev, exp: prev.exp + exp} : {t, exp, p, dir, kt};
+  });
+  return days.slice(0, 7);
+}
+const dayLabel = (d, i) => (i === 0 ? 'Today' : WD[d.wd]) + ' ' + fmtDay(d.date).replace(/^\w+ /, '');
+const textOn = c => (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) > 140 ? '#111' : '#fff';
+const lands = p => p >= 0.7 ? 'lands S' : p <= 0.3 ? 'lands N' : 'S or N';
+const hourSpan = h => `${h % 12 || 12}${h < 12 ? 'a' : 'p'}–${(h + 1) % 12 || 12}${h + 1 < 12 || h + 1 === 24 ? 'a' : 'p'}`;
+function drawFcBlocks() {
+  const sums = FCDAYS.map(d => BLOCKS.map(([a, b]) => {
+    const hs = d.hours.slice(a, b).filter(Boolean);
+    return hs.length ? {exp: hs.reduce((s, x) => s + x.exp, 0), p: hs.reduce((s, x) => s + x.p, 0) / hs.length,
+                        from: hs.length < b - a ? hs[0].t : null} : null;
+  }));
+  const top = Math.max(1, ...sums.flat().filter(Boolean).map(x => x.exp));
+  const tb = document.getElementById('fc-blocks'); tb.innerHTML = '';
+  sums.forEach((row, i) => {
+    const tr = document.createElement('tr');
+    if (i === FCSEL) tr.className = 'sel';
+    tr.innerHTML = `<td>${dayLabel(FCDAYS[i], i)}</td>` + row.map(x => {
+      if (!x) return '<td class="note">—</td>';
+      const c = viridis(Math.pow(x.exp / top, 0.8));
+      return `<td><span class="chip" style="background:rgb(${c.join(',')});color:${textOn(c)}"` +
+        (x.from ? ` title="From ${hourSpan(et(x.from).hour).split('–')[0]}"` : '') +
+        `>${Math.round(x.exp)}<small>${lands(x.p)}</small></span></td>`;
+    }).join('');
+    tr.onclick = () => { FCSEL = i; drawForecast(); };
+    tb.appendChild(tr);
+  });
+}
+const FCG = {left: 64, top: 4, rowH: 24, axis: 18};
+function drawFcGrid() {
+  const cv = document.getElementById('fc-grid');
+  const {ctx, w} = setupCanvas(cv, FCG.top + FCG.rowH * FCDAYS.length + FCG.axis);
+  const top = Math.max(1, ...FCDAYS.flatMap(d => d.hours.filter(Boolean).map(x => x.exp)));
+  const cw = (w - FCG.left - 4) / 24;
+  ctx.font = '11px -apple-system, sans-serif'; ctx.textBaseline = 'middle';
+  FCDAYS.forEach((d, r) => {
+    const y = FCG.top + r * FCG.rowH;
+    ctx.fillStyle = r === FCSEL ? '#fff' : '#aab';
+    ctx.fillText(dayLabel(d, r), 2, y + FCG.rowH / 2);
+    d.hours.forEach((x, h) => {
+      ctx.fillStyle = x ? `rgb(${viridis(Math.pow(x.exp / top, 0.8)).join(',')})` : '#1a1a26';
+      ctx.fillRect(FCG.left + h * cw, y + 2, Math.ceil(cw), FCG.rowH - 4);
+    });
+    if (r === FCSEL) { ctx.strokeStyle = 'rgba(253,231,37,0.9)'; ctx.lineWidth = 1; ctx.strokeRect(FCG.left - 1, y + 0.5, w - FCG.left - 2, FCG.rowH - 1); }
+  });
+  drawAxis(ctx, FCG.left, cw / 4, FCG.top + FCG.rowH * FCDAYS.length + 10);
+}
+function drawFcBars() {
+  const d = FCDAYS[FCSEL], cv = document.getElementById('fc-bars');
+  const {ctx, w, h} = setupCanvas(cv, 210);
+  const left = 30, top = 8, bottom = h - 48, cw = (w - left - 4) / 24;
+  const max = Math.max(...d.hours.filter(Boolean).map(x => x.exp), 1), nice = Math.ceil(max / 5) * 5;
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.fillStyle = '#99a'; ctx.font = '10px -apple-system, sans-serif';
+  ctx.textBaseline = 'middle';
+  for (let g = 0; g <= nice; g += nice / 5) {
+    const y = bottom - (bottom - top) * g / nice;
+    ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(w - 4, y); ctx.stroke();
+    ctx.fillText(String(Math.round(g)), 2, y);
+  }
+  const every = cw < 22 ? 3 : 1;          // wind arrows: every hour if there is room
+  d.hours.forEach((x, hh) => {
+    if (!x) return;
+    const bx = left + hh * cw + 1, bh = (bottom - top) * x.exp / nice;
+    ctx.fillStyle = `rgb(${ORANGE.join(',')})`; ctx.fillRect(bx, bottom - bh, Math.max(1, cw - 2), bh);
+    if (hh % every) return;
+    const cx = left + (hh + 0.5) * cw, cy = bottom + 14, a = (x.dir + 180) * Math.PI / 180;   // pointing where it blows to
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
+    ctx.fillStyle = '#dde'; ctx.beginPath(); ctx.moveTo(0, -6); ctx.lineTo(4, 5); ctx.lineTo(0, 2.5); ctx.lineTo(-4, 5); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = '#99a'; ctx.textAlign = 'center'; ctx.fillText(String(Math.round(x.kt)), cx, bottom + 28); ctx.textAlign = 'left';
+  });
+  drawAxis(ctx, left, cw / 4, h - 7);
+  const hs = d.hours.filter(Boolean), tot = hs.reduce((s, x) => s + x.exp, 0);
+  document.getElementById('fc-day-title').textContent = (FCSEL ? dayLabel(d, FCSEL) : 'Rest of today') +
+    (hs.length ? `: about ${Math.round(tot)} planes` : ': nothing left to forecast');
+}
+function drawForecast() { drawFcBlocks(); drawFcGrid(); drawFcBars(); }
+function fcTip(e) {
+  const cv = document.getElementById('fc-grid'), cw = (cv.clientWidth - FCG.left - 4) / 24;
+  const r = Math.floor((e.offsetY - FCG.top) / FCG.rowH), hh = Math.floor((e.offsetX - FCG.left) / cw);
+  const tip = document.getElementById('fc-tip'), x = FCDAYS && FCDAYS[r] && FCDAYS[r].hours[hh];
+  if (!x) { tip.textContent = ''; return r; }
+  tip.textContent = `${dayLabel(FCDAYS[r], r)} ${hourSpan(hh)}: about ${Math.round(x.exp)} planes · wind from the ` +
+    `${COMPASS[Math.round(x.dir / 22.5) % 16]} at ${Math.round(x.kt)} kt · Dulles landing south ${Math.round(x.p * 100)}% likely`;
+  return r;
+}
+const fcGrid = document.getElementById('fc-grid');     // not there on the public page
+if (fcGrid) {
+  fcGrid.addEventListener('click', e => {
+    const r = fcTip(e);
+    if (FCDAYS && r >= 0 && r < FCDAYS.length) { FCSEL = r; drawForecast(); fcTip(e); }
+  });
+  fcGrid.addEventListener('mousemove', fcTip);
+}
+window.addEventListener('resize', () => { if (FCDAYS) { drawFcGrid(); drawFcBars(); } });
+
+async function loadForecast() {
+  const note = document.getElementById('fc-note');
+  if (!DATA.complete_days.length) { note.textContent = 'Needs a whole day of Dulles counts first.'; return; }
+  try {
+    const [m, om] = await Promise.all(['farm-model.json', FC_URL].map(async u => {
+      const r = await fetch(u); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }));
+    MODEL = m; FCDAYS = buildForecast(om);
+  } catch (e) { note.textContent = 'The wind forecast could not be loaded (' + e.message + ').'; return; }
+  const pct = x => Math.round(x * 100);
+  note.textContent = `Planes expected within ${MODEL.near_mi} miles of the farm, below ${MODEL.below_ft.toLocaleString()} ft. ` +
+    `When Dulles lands to the south, ${pct(MODEL.share.S)}% of its arrivals pass over; landing north, ${pct(MODEL.share.N)}%. ` +
+    `Which way it lands follows the wind (Open-Meteo forecast), though not always. ` +
+    `Higher up, about ${Math.round(MODEL.above_per_hour.S)} an hour pass whatever the wind.`;
+  const k = MODEL.check, hrs = MODEL.hours;
+  document.getElementById('fc-about').textContent = `Counts planes passing within ${MODEL.near_mi} miles of the farm below ` +
+    `${MODEL.below_ft.toLocaleString()} ft: Dulles's usual landings for that hour and weekday (from the counts below) times the ` +
+    `share that pass over the farm for the way it is likely to be landing. Measured ${fmtDay(MODEL.first)} – ${fmtDay(MODEL.last)}: ` +
+    `${hrs.south} hours landing south, ${hrs.north} north. Landing south was ${pct(MODEL.p_south[MODEL.p_south.length - 1].p)}% ` +
+    `of hours with at least ${MODEL.p_south[MODEL.p_south.length - 1].from_kt} knots of wind from the south along the runways, ` +
+    `${pct(MODEL.p_south[0].p)}% with any wind from the north. Checked on the same weeks with the winds that actually blew: ` +
+    (k.quiet_blocks && k.busy_blocks ? `6-hour blocks it called quiet had a median of ${k.quiet_blocks.median} planes, ` +
+    `busy ones ${k.busy_blocks.median} (fewest ${k.busy_blocks.min}); but Dulles doesn't always go with the wind, and one ` +
+    `"quiet" block had ${k.quiet_blocks.max}. ` : '') + 'A forecast wind can be wrong as well.';
+  FCSEL = FCDAYS[0].hours.some(Boolean) ? 0 : 1;
+  drawForecast();
 }
 load();
 </script>

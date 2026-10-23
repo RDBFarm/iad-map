@@ -50,7 +50,9 @@ shows everything the receiver hears, at every height, 200 miles out, with the
 FAA's radio beacons marked (`beacons.js`, built by `tools/make_beacons.py`).
 `busy.html` shows when Dulles is busiest: every landing and take-off the
 receiver heard, per 15 minutes of Eastern time, averaged by day of the week
-(`pi/busy.py`, counted on the Pi as each hour ends).
+(`pi/busy.py`, counted on the Pi as each hour ends). At the top, a forecast
+of planes over the farm for the next 7 days, from Open-Meteo's wind forecast
+for Dulles and the numbers in `farm-model.json` (`tools/make_farm_model.py`).
 `flights.html` is the same map without anything about the farm, built from
 `live.html` by `tools/make_public.py` (never edit it by hand).
 Tapping a dot on any route opens the same card for that aircraft. The panel
