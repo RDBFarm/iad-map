@@ -4,11 +4,12 @@ errors and show it. Needs Playwright with Chromium; skipped without it.
   PLAYWRIGHT_CHROMIUM=/path/to/chromium   use that browser binary
   LEAFLET_DIST=/path/to/leaflet/dist      serve Leaflet locally (no network)
 """
-import datetime, functools, http.server, json, os, threading, unittest
+import datetime, functools, http.server, json, os, threading, time, unittest
 from zoneinfo import ZoneInfo
 
 import fixture as F
 import busy as B
+import farmcast as C
 import heatmap as H
 import publish as P
 
@@ -28,6 +29,9 @@ def publish_fixture():
         H.update(F.WORK, P.heat_points_for_hour, F.NOW + 31 * 3600, os.path.join(F.DRIVE, "pages-heat"), db_start=start)
         H.update_wide(F.WORK, P.wide_points_for_hour, F.NOW, os.path.join(F.DRIVE, "pages-wide"), db_start=start)
     B.update(F.WORK, F.NOW + 3 * 3600, os.path.join(F.DRIVE, "pages-busy"), final)
+    C.update(F.WORK, F.NOW + 3 * 3600, os.path.join(F.DRIVE, "pages-farmcast"), final,
+             [{"epoch": F.T0 + 1800 + 3600 * i, "drct": 180, "sknt": 10, "compass": "S"} for i in range(F.HOURS)],
+             fetch=lambda url, timeout=30: (_ for _ in ()).throw(OSError("no network in the tests")))
     return index
 
 
@@ -232,8 +236,44 @@ class Pages(unittest.TestCase):
             fw = pg.evaluate("document.getElementById('fc-bars').clientWidth")
             pg.click("#fc-bars", position={"x": 30 + 15.5 * (fw - 34) / 24, "y": 80})
             self.assertRegex(pg.inner_text("#fc-bar-tip"), r"3p\u20134p: about \d+ planes \u00b7 wind from the S at 10 kt")
+            self.assertEqual(pg.inner_text("#fc-record"), "", "no numbers from the Pi here")
+            # the page's arithmetic and the Pi's twin (farmcast.predict), which scores its kept forecasts
+            page = dict(pg.evaluate("FCDAYS.flatMap(d => d.hours.filter(Boolean).map(x => [x.t, x.exp]))"))
+            with open(os.path.join(F.ROOT, "farm-model.json")) as f, open(os.path.join(F.ROOT, "busy-seed.json")) as g:
+                pi = C.predict(json.load(f), json.load(g), json.loads(om), time.time())
+            both = [t for t in page if t in pi and C.local(t).hour != 1]     # 1 AM happens twice when the clocks go back
+            self.assertGreater(len(both), 100)
+            for t in both:
+                self.assertAlmostEqual(page[t], pi[t][2], places=9, msg=C.local(t).isoformat())
             self.assertEqual(errors, [])
             pg.close()
+
+    def test_farm_forecast_uses_the_pi_once_ready(self):
+        with open(os.path.join(F.ROOT, "farm-model.json")) as f:
+            seed = json.load(f)
+        pi = dict(seed, ready=True, share={"S": 0.5, "N": 0.01}, source="pi/farmcast.py",
+                  score={"days": 28, "forecasts": 9, "by_lead": [
+                      {"lead": 0, "blocks": 12, "median_err": 4.0, "median_actual": 15, "median_forecast": 13.0},
+                      {"lead": 1, "blocks": 20, "median_err": 6.5, "median_actual": 14, "median_forecast": 12.0},
+                      {"lead": 3, "blocks": 3, "median_err": 9.0, "median_actual": 14, "median_forecast": 10.0}]})
+        om = json.dumps({"hourly": {"time": [int(time.time()) // 3600 * 3600 + 3600 * i for i in range(48)],
+                                    "wind_speed_10m": [10] * 48, "wind_direction_10m": [180] * 48}})
+        pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/",
+                               fulfil={"farm-model.json?t=": json.dumps(pi), "api.open-meteo.com": om})
+        self.assertEqual(errors, [])
+        self.assertIn("50% of its arrivals", pg.inner_text("#fc-note"))
+        self.assertEqual(pg.inner_text("#fc-record"), "How it has done (last 28 days): 6-hour blocks forecast later the "
+                         "same day were off by a median of 4 planes; the next day 6.5. A typical block had 15.")
+        pg.close()
+        # the Pi's own numbers before they cover two weeks: the snapshot is used, and the page says so
+        with open(os.path.join(F.WORK, "farm-model.json")) as f:      # the made-up log's: three hours
+            mine = f.read()
+        pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/",
+                               fulfil={"farm-model.json?t=": mine, "api.open-meteo.com": om})
+        self.assertEqual(errors, [])
+        self.assertIn(f"{round(seed['share']['S'] * 100)}% of its arrivals", pg.inner_text("#fc-note"))
+        self.assertIn("The Pi is counting its own numbers (3 of 336 hours so far)", pg.inner_text("#fc-record"))
+        pg.close()
 
     def test_busy_times_public_page_has_no_farm(self):
         pg, errors = self.open("busy.html?public", data=self.site_url + "no-such-branch/")

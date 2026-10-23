@@ -52,7 +52,9 @@ FAA's radio beacons marked (`beacons.js`, built by `tools/make_beacons.py`).
 receiver heard, per 15 minutes of Eastern time, averaged by day of the week
 (`pi/busy.py`, counted on the Pi as each hour ends). At the top, a forecast
 of planes over the farm for the next 7 days, from Open-Meteo's wind forecast
-for Dulles and the numbers in `farm-model.json` (`tools/make_farm_model.py`).
+for Dulles and numbers the Pi keeps up to date from every hour it has counted
+(`pi/farmcast.py`). The Pi also keeps each morning's forecast and checks it
+once the day is over; the page shows how it has done.
 `flights.html` is the same map without anything about the farm, built from
 `live.html` by `tools/make_public.py` (never edit it by hand).
 Tapping a dot on any route opens the same card for that aircraft. The panel
