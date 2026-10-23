@@ -26,7 +26,10 @@
   .row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:6px 0; }
   .row .lbl { font-size:0.72rem; color:#99a; margin-right:2px; }
   canvas { display:block; width:100%; touch-action:manipulation; }
-  #tip { min-height:1.3em; font-size:0.76rem; color:#fff; margin-top:6px; }
+  .tip { min-height:1.5em; font-size:0.82rem; color:#fff; margin-top:6px; padding:5px 8px; border-radius:6px;
+    background:rgba(255,255,255,0.07); line-height:1.4; }
+  .tip:empty { background:none; padding:5px 0; }
+  .tip:empty::before { content:attr(data-hint); color:#8899bb; font-size:0.74rem; }
   .key { display:flex; gap:14px; flex-wrap:wrap; font-size:0.7rem; color:#aab; margin-top:6px; align-items:center; }
   .sw { display:inline-block; width:12px; height:10px; border-radius:2px; vertical-align:-1px; margin-right:4px; }
   .ramp { display:inline-block; width:120px; height:10px; border-radius:3px; vertical-align:-1px; margin:0 4px; }
@@ -87,15 +90,16 @@
     <h3>Hour by hour</h3>
     <div class="note">Brighter is more planes. Tap a day to chart it.</div>
     <canvas id="fc-grid" aria-label="Planes expected over the farm each hour, next 7 days"></canvas>
-    <div id="fc-tip"></div>
+    <div class="tip" id="fc-tip" data-hint="Tap an hour for its figures."></div>
     <h3 id="fc-day-title"></h3>
     <canvas id="fc-bars" aria-label="Planes expected over the farm each hour of the chosen day"></canvas>
+    <div class="tip" id="fc-bar-tip" data-hint="Tap a bar for its figures."></div>
     <div class="key"><span><span class="sw" style="background:rgb(230,159,0)"></span>Planes expected</span><span>➤ wind, blowing this way (knots)</span></div>
   </div>
 
   <div class="panel">
     <div class="row"><span class="lbl">Show</span>
-      <button class="btn on" data-kind="ad">Landings + take-offs</button><button class="btn" data-kind="a">Landings</button><button class="btn" data-kind="d">Take-offs</button>
+      <button class="btn" data-kind="ad">Landings + take-offs</button><button class="btn on" data-kind="a">Landings</button><button class="btn" data-kind="d">Take-offs</button>
     </div>
     <div class="row" id="span-row"><span class="lbl">Period</span>
       <button class="btn on" data-span="28">Last 4 weeks</button><button class="btn" data-span="0">All recorded</button>
@@ -105,16 +109,17 @@
 
   <div class="panel">
     <h2>By day of the week</h2>
-    <div class="note">Average per 15 minutes; brighter is busier. The white box is each day's busiest hour. Tap a row to chart that day.</div>
+    <div class="note">Average per 15 minutes; brighter is busier. The white box is each day's busiest hour. Tap a time for its figures; that day is charted below.</div>
     <canvas id="grid" aria-label="Average landings and take-offs per 15 minutes, by day of the week"></canvas>
     <div class="key"><span>quiet<span class="ramp" id="ramp"></span><span id="ramp-max">busiest</span></span></div>
-    <div id="tip"></div>
+    <div class="tip" id="tip" data-hint="Tap a time for its figures."></div>
   </div>
 
   <div class="panel">
     <h2 id="day-title">Every day</h2>
     <div class="note" id="day-note"></div>
     <canvas id="bars" aria-label="Average per 15 minutes for the chosen day"></canvas>
+    <div class="tip" id="bar-tip" data-hint="Tap a bar for its figures."></div>
     <div class="key"><span><span class="sw" style="background:rgb(230,159,0)"></span>Landings</span><span><span class="sw" style="background:rgb(86,180,233)"></span>Take-offs</span><span><span class="sw" style="background:rgba(253,231,37,0.25)"></span>Busiest hour</span></div>
   </div>
 
@@ -165,7 +170,7 @@ const viridis = t => { const x = Math.max(0, Math.min(1, t)) * 9, i = Math.min(8
 document.getElementById('ramp').style.background = 'linear-gradient(to right,' +
   Array.from({length: 11}, (_, i) => `rgb(${viridis(i / 10).join(',')})`).join(',') + ')';
 
-let DATA = null, KIND = 'ad', SPAN = 28, SEL = 0, STATS = null;
+let DATA = null, KIND = 'a', SPAN = 28, SEL = 0, STATS = null, PICK = null;   // PICK: the quarter-hour tapped, on row SEL
 const quarter = q => { const h = Math.floor(q / 4), m = (q % 4) * 15;
   return (h % 12 || 12) + ':' + String(m).padStart(2, '0') + ' ' + (h < 12 ? 'AM' : 'PM'); };
 // "3:30–4:30 PM", or "11:30 AM–12:30 PM" across noon
@@ -221,8 +226,14 @@ function drawGrid() {
     }
     if (r === SEL) { ctx.strokeStyle = 'rgba(253,231,37,0.9)'; ctx.lineWidth = 1; ctx.strokeRect(GRID.left - 1, y + 0.5, w - GRID.left - 2, GRID.rowH - 1); }
   });
+  if (PICK != null) markCell(ctx, GRID.left + PICK * cw, GRID.top + SEL * GRID.rowH, cw, GRID.rowH);
   drawAxis(ctx, GRID.left, cw, GRID.top + GRID.rowH * 8 + 10);
   document.getElementById('ramp-max').textContent = 'busiest (' + top.toFixed(1) + ' per 15 min)';
+}
+// the tapped cell: black inside white, so it shows on any colour and isn't the busiest-hour box
+function markCell(ctx, x, y, cw, rowH) {
+  ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.strokeRect(x - 1.5, y + 0.5, cw + 3, rowH - 1);
+  ctx.lineWidth = 1; ctx.strokeStyle = '#000'; ctx.strokeRect(x + 0.5, y + 2.5, Math.max(1, cw - 1), rowH - 5);
 }
 function drawAxis(ctx, left, cw, y) {
   ctx.fillStyle = '#99a'; ctx.font = '10px -apple-system, sans-serif'; ctx.textAlign = 'center';
@@ -239,6 +250,7 @@ function drawBars() {
   const max = Math.max(...STATS[SEL].v, 1), nice = Math.ceil(max / 5) * 5;
   ctx.fillStyle = 'rgba(253,231,37,0.18)';
   ctx.fillRect(left + s.hourStart * cw, top, cw * 4, bottom - top);
+  if (PICK != null) { ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(left + PICK * cw - 1, top, cw + 2, bottom - top); }
   ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.fillStyle = '#99a'; ctx.font = '10px -apple-system, sans-serif';
   ctx.textBaseline = 'middle';
   for (let g = 0; g <= nice; g += nice / 5) {
@@ -274,30 +286,49 @@ function drawTable() {
     tb.appendChild(tr);
   });
 }
-function select(i) { SEL = i; drawGrid(); drawBars(); drawTable(); }
+function select(i) { SEL = i; drawGrid(); drawBars(); drawTable(); showPick(); }
 function render() {
   STATS = compute();
   const days = STATS[0];
   document.getElementById('period-lbl').textContent = days.n ? `${days.n} days, ${fmtDay(days.first)} – ${fmtDay(days.last)}` : 'no whole days yet';
-  drawGrid(); drawBars(); drawTable();
+  drawGrid(); drawBars(); drawTable(); showPick();
 }
 const fmtDay = iso => new Date(iso + 'T12:00:00Z').toLocaleDateString('en-US', {month: 'short', day: 'numeric', timeZone: 'UTC'});
 
-document.getElementById('grid').addEventListener('click', e => {
-  const r = Math.floor((e.offsetY - GRID.top) / GRID.rowH);
-  if (r >= 0 && r < 8) select(r);
-  showTip(e);
-});
-document.getElementById('grid').addEventListener('mousemove', showTip);
-function showTip(e) {
-  const cv = document.getElementById('grid'), cw = (cv.clientWidth - GRID.left - 4) / 96;
-  const r = Math.floor((e.offsetY - GRID.top) / GRID.rowH), q = Math.floor((e.offsetX - GRID.left) / cw);
-  const tip = document.getElementById('tip');
-  if (r < 0 || r > 7 || q < 0 || q > 95 || !STATS[r].n) { tip.textContent = ''; return; }
-  const s = STATS[r];
-  tip.textContent = `${s.label} ${quarter(q)}: ${s.v[q].toFixed(1)} on average` +
-    (KIND === 'ad' ? ` (${s.a[q].toFixed(1)} landings, ${s.d[q].toFixed(1)} take-offs)` : '') + ` · ${s.n} days`;
+// Tap a time on the grid or a bar on the chart: its figures, under both
+const qspan = q => { const a = quarter(q), b = quarter(q + 1);
+  return a.slice(-2) === b.slice(-2) ? a.slice(0, -3) + '–' + b : a + '–' + b; };
+function pickText(r, q) {
+  const s = STATS && STATS[r];
+  if (!s || !s.n || q == null || q < 0 || q > 95) return '';
+  const fig = KIND === 'a' ? `${s.a[q].toFixed(1)} landings` : KIND === 'd' ? `${s.d[q].toFixed(1)} take-offs`
+    : `${s.v[q].toFixed(1)} (${s.a[q].toFixed(1)} landings, ${s.d[q].toFixed(1)} take-offs)`;
+  return `${r ? LONG[s.label] : 'Every day'}, ${qspan(q)}: ${fig} on average · ${s.n} days`;
 }
+function showPick() {
+  const t = pickText(SEL, PICK);
+  document.getElementById('tip').textContent = t; document.getElementById('bar-tip').textContent = t;
+}
+function gridAt(e) {
+  const cw = (document.getElementById('grid').clientWidth - GRID.left - 4) / 96;
+  return {r: Math.floor((e.offsetY - GRID.top) / GRID.rowH), q: Math.floor((e.offsetX - GRID.left) / cw)};
+}
+const barAt = e => Math.floor((e.offsetX - 30) / ((document.getElementById('bars').clientWidth - 34) / 96));
+const grid = document.getElementById('grid'), bars = document.getElementById('bars');
+grid.addEventListener('click', e => {
+  const {r, q} = gridAt(e);
+  if (r >= 0 && r < 8) { if (q >= 0 && q < 96) PICK = q; select(r); }
+});
+grid.addEventListener('mousemove', e => { const {r, q} = gridAt(e);
+  document.getElementById('tip').textContent = pickText(r, q) || pickText(SEL, PICK); });
+grid.addEventListener('mouseleave', showPick);
+bars.addEventListener('click', e => {
+  const q = barAt(e);
+  if (q >= 0 && q < 96) { PICK = q; drawGrid(); drawBars(); showPick(); }
+});
+bars.addEventListener('mousemove', e => {
+  document.getElementById('bar-tip').textContent = pickText(SEL, barAt(e)) || pickText(SEL, PICK); });
+bars.addEventListener('mouseleave', showPick);
 document.querySelectorAll('[data-kind]').forEach(b => b.onclick = () => {
   KIND = b.dataset.kind; document.querySelectorAll('[data-kind]').forEach(x => x.classList.toggle('on', x === b)); render(); });
 document.querySelectorAll('[data-span]').forEach(b => b.onclick = () => {
@@ -338,7 +369,7 @@ const FC_URL = 'https://api.open-meteo.com/v1/forecast?latitude=38.9445&longitud
 const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const BLOCKS = [[0, 6], [6, 12], [12, 18], [18, 24]];
 const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
-let MODEL = null, FCDAYS = null, FCSEL = 0;
+let MODEL = null, FCDAYS = null, FCSEL = 0, FCPICK = null;   // FCPICK: the hour tapped, on day FCSEL
 // Eastern time whatever the viewer's own zone
 const ET = new Intl.DateTimeFormat('en-US', {timeZone: 'America/New_York', year: 'numeric', month: '2-digit',
   day: '2-digit', hour: '2-digit', hourCycle: 'h23', weekday: 'short'});
@@ -418,6 +449,7 @@ function drawFcGrid() {
     });
     if (r === FCSEL) { ctx.strokeStyle = 'rgba(253,231,37,0.9)'; ctx.lineWidth = 1; ctx.strokeRect(FCG.left - 1, y + 0.5, w - FCG.left - 2, FCG.rowH - 1); }
   });
+  if (FCPICK != null && FCDAYS[FCSEL].hours[FCPICK]) markCell(ctx, FCG.left + FCPICK * cw, FCG.top + FCSEL * FCG.rowH, cw, FCG.rowH);
   drawAxis(ctx, FCG.left, cw / 4, FCG.top + FCG.rowH * FCDAYS.length + 10);
 }
 function drawFcBars() {
@@ -432,6 +464,7 @@ function drawFcBars() {
     ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(w - 4, y); ctx.stroke();
     ctx.fillText(String(Math.round(g)), 2, y);
   }
+  if (FCPICK != null && d.hours[FCPICK]) { ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(left + FCPICK * cw, top, cw, bottom - top); }
   const every = cw < 22 ? 3 : 1;          // wind arrows: every hour if there is room
   d.hours.forEach((x, hh) => {
     if (!x) return;
@@ -449,23 +482,35 @@ function drawFcBars() {
   document.getElementById('fc-day-title').textContent = (FCSEL ? dayLabel(d, FCSEL) : 'Rest of today') +
     (hs.length ? `: about ${Math.round(tot)} planes` : ': nothing left to forecast');
 }
-function drawForecast() { drawFcBlocks(); drawFcGrid(); drawFcBars(); }
-function fcTip(e) {
-  const cv = document.getElementById('fc-grid'), cw = (cv.clientWidth - FCG.left - 4) / 24;
-  const r = Math.floor((e.offsetY - FCG.top) / FCG.rowH), hh = Math.floor((e.offsetX - FCG.left) / cw);
-  const tip = document.getElementById('fc-tip'), x = FCDAYS && FCDAYS[r] && FCDAYS[r].hours[hh];
-  if (!x) { tip.textContent = ''; return r; }
-  tip.textContent = `${dayLabel(FCDAYS[r], r)} ${hourSpan(hh)}: about ${Math.round(x.exp)} planes · wind from the ` +
-    `${COMPASS[Math.round(x.dir / 22.5) % 16]} at ${Math.round(x.kt)} kt · Dulles landing south ${Math.round(x.p * 100)}% likely`;
-  return r;
+function drawForecast() { drawFcBlocks(); drawFcGrid(); drawFcBars(); fcShowPick(); }
+function fcText(r, hh) {
+  const x = FCDAYS && FCDAYS[r] && FCDAYS[r].hours[hh];
+  return x ? `${dayLabel(FCDAYS[r], r)} ${hourSpan(hh)}: about ${Math.round(x.exp)} planes · wind from the ` +
+    `${COMPASS[Math.round(x.dir / 22.5) % 16]} at ${Math.round(x.kt)} kt · Dulles landing south ${Math.round(x.p * 100)}% likely` : '';
 }
-const fcGrid = document.getElementById('fc-grid');     // not there on the public page
+function fcShowPick() {
+  const t = fcText(FCSEL, FCPICK);
+  document.getElementById('fc-tip').textContent = t; document.getElementById('fc-bar-tip').textContent = t;
+}
+const fcGrid = document.getElementById('fc-grid'), fcBars = document.getElementById('fc-bars');   // not there on the public page
 if (fcGrid) {
+  const at = e => { const cw = (fcGrid.clientWidth - FCG.left - 4) / 24;
+    return {r: Math.floor((e.offsetY - FCG.top) / FCG.rowH), hh: Math.floor((e.offsetX - FCG.left) / cw)}; };
+  const barHour = e => Math.floor((e.offsetX - 30) / ((fcBars.clientWidth - 34) / 24));
   fcGrid.addEventListener('click', e => {
-    const r = fcTip(e);
-    if (FCDAYS && r >= 0 && r < FCDAYS.length) { FCSEL = r; drawForecast(); fcTip(e); }
+    const {r, hh} = at(e);
+    if (FCDAYS && r >= 0 && r < FCDAYS.length) { FCSEL = r; if (hh >= 0 && hh < 24) FCPICK = hh; drawForecast(); }
   });
-  fcGrid.addEventListener('mousemove', fcTip);
+  fcGrid.addEventListener('mousemove', e => { const {r, hh} = at(e);
+    document.getElementById('fc-tip').textContent = fcText(r, hh) || fcText(FCSEL, FCPICK); });
+  fcGrid.addEventListener('mouseleave', () => FCDAYS && fcShowPick());
+  fcBars.addEventListener('click', e => {
+    const hh = barHour(e);
+    if (FCDAYS && hh >= 0 && hh < 24) { FCPICK = hh; drawForecast(); }
+  });
+  fcBars.addEventListener('mousemove', e => { if (FCDAYS)
+    document.getElementById('fc-bar-tip').textContent = fcText(FCSEL, barHour(e)) || fcText(FCSEL, FCPICK); });
+  fcBars.addEventListener('mouseleave', () => FCDAYS && fcShowPick());
 }
 window.addEventListener('resize', () => { if (FCDAYS) { drawFcGrid(); drawFcBars(); } });
 
