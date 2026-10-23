@@ -4,7 +4,8 @@ errors and show it. Needs Playwright with Chromium; skipped without it.
   PLAYWRIGHT_CHROMIUM=/path/to/chromium   use that browser binary
   LEAFLET_DIST=/path/to/leaflet/dist      serve Leaflet locally (no network)
 """
-import functools, http.server, os, threading, unittest
+import datetime, functools, http.server, json, os, threading, unittest
+from zoneinfo import ZoneInfo
 
 import fixture as F
 import busy as B
@@ -64,7 +65,7 @@ class Pages(unittest.TestCase):
         cls.site.shutdown()
         cls.data.shutdown()
 
-    def open(self, page_name, width=1280, height=800, hash_="", data=None):
+    def open(self, page_name, width=1280, height=800, hash_="", data=None, fulfil=None):
         pg = self.browser.new_page(viewport={"width": width, "height": height})
         errors = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
@@ -76,11 +77,15 @@ class Pages(unittest.TestCase):
                 js = url.split("?")[0].endswith(".js")
                 return r.fulfill(path=os.path.join(dist, "leaflet.js" if js else "leaflet.css"),
                                  content_type="application/javascript" if js else "text/css")
+            for part, body in (fulfil or {}).items():
+                if part in url:
+                    return r.fulfill(body=body, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"})
             if url.startswith(("http://127.0.0.1", "https://cdnjs.cloudflare.com")):
                 return r.continue_()
             return r.abort()       # map tiles, radar: not needed, and must not make a test flaky
         pg.route("**/*", route)
-        pg.goto(f"{self.site_url}{page_name}?data={data or self.data_url}{hash_}", wait_until="load")
+        sep = "&" if "?" in page_name else "?"
+        pg.goto(f"{self.site_url}{page_name}{sep}data={data or self.data_url}{hash_}", wait_until="load")
         pg.wait_for_timeout(2500)
         return pg, errors
 
@@ -149,6 +154,7 @@ class Pages(unittest.TestCase):
         pg, errors = self.open("flights.html")
         self.assertEqual(errors, [])
         self.assertNotIn("RDBF receiver", pg.inner_text("#hdr"))
+        self.assertEqual(pg.get_attribute("#btn-busy", "href"), "busy.html?public")
         pg.close()
 
     def test_history_near_and_wide(self):
@@ -172,6 +178,7 @@ class Pages(unittest.TestCase):
         self.assertIn("Counted by the farm's receiver", pg.inner_text("#status"))
         self.assertIn("0 whole days", pg.inner_text("#status"))   # the made-up log is three hours
         self.assertIn("no whole days yet", pg.inner_text("#tbl"))
+        self.assertIn("Needs a whole day", pg.inner_text("#fc-note"))
         pg.close()
 
     def test_busy_times_snapshot_until_the_pi_has_published(self):
@@ -188,6 +195,41 @@ class Pages(unittest.TestCase):
             self.assertNotEqual(pg.inner_text("#tbl tr"), first)
             self.assertEqual(errors, [])
             pg.close()
+
+    def test_farm_forecast_follows_the_wind(self):
+        # a made-up week from local midnight today: 3 days of wind from the south, then from the north
+        tz = ZoneInfo("America/New_York")
+        start = int(datetime.datetime.combine(datetime.datetime.now(tz).date(), datetime.time(), tz).timestamp())
+        times = [start + 3600 * i for i in range(7 * 24)]
+        om = json.dumps({"hourly": {"time": times, "wind_speed_10m": [10] * len(times),
+                                    "wind_direction_10m": [180 if i < 72 else 0 for i in range(len(times))]}})
+        for width in (1280, 390):
+            pg, errors = self.open("busy.html", width=width, data=self.site_url + "no-such-branch/",
+                                   fulfil={"api.open-meteo.com": om})
+            self.assertEqual(errors, [], f"busy.html at {width}px")
+            self.assertIn("within 2 miles of the farm", pg.inner_text("#fc-note"))
+            rows = pg.query_selector_all("#fc-blocks tr")
+            self.assertEqual(len(rows), 7)
+            cell = lambda r, b: rows[r].query_selector_all("td")[b + 1].inner_text()
+            south, north = cell(1, 2), cell(5, 2)          # tomorrow's afternoon, and five days on
+            self.assertIn("lands S", south)
+            self.assertIn("lands N", north)
+            self.assertGreater(int(south.split()[0]), 40)
+            self.assertLess(int(north.split()[0]), 10)
+            self.assertLessEqual(pg.evaluate("document.documentElement.scrollWidth"), width)
+            rows[2].click()
+            self.assertIn("planes", pg.inner_text("#fc-day-title"))
+            self.assertEqual(errors, [])
+            pg.close()
+
+    def test_busy_times_public_page_has_no_farm(self):
+        pg, errors = self.open("busy.html?public", data=self.site_url + "no-such-branch/")
+        self.assertEqual(errors, [])
+        self.assertIsNone(pg.query_selector("#fc-panel"))
+        self.assertEqual(pg.evaluate("document.querySelectorAll('.farm').length"), 0)
+        self.assertEqual(pg.get_attribute("#back", "href"), "flights.html")
+        self.assertIn("3:30\u20134:30 PM", pg.inner_text("#tbl tr"))
+        pg.close()
 
 
 if __name__ == "__main__":

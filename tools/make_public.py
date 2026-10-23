@@ -24,6 +24,9 @@ def build(src):
     for old, new in [
         ("const FARM_MODE = true;", "const FARM_MODE = false;"),
         ("<title>IAD Flight Activity — Live</title>", "<title>IAD Flight Activity</title>"),
+        # busy.html?public leaves its farm forecast off
+        ('href="busy.html" title="When Dulles is busiest, and planes expected over the farm in the next 7 days"',
+         'href="busy.html?public" title="When Dulles is busiest: landings and take-offs by time and day"'),
     ]:
         if out.count(old) != 1:
             raise SystemExit(f"live.html no longer has exactly one {old!r}")
