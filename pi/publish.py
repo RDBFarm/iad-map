@@ -47,6 +47,7 @@ from zoneinfo import ZoneInfo
 import aircraft_lookup
 import busy
 import farm
+import farmcast
 import heatmap
 import proximity
 import tracks
@@ -921,6 +922,16 @@ def update_busy(final, now):
         print("publish: busy times failed:", e, flush=True)
 
 
+def update_farm_forecast(final, now, wx):
+    """The farm forecast's numbers and the record of its kept forecasts (farmcast.py),
+    after busy.json, which it reads. Never stops the map."""
+    try:
+        if farmcast.update(WORK_DIR, now, os.path.join(os.path.dirname(DB_PATH), "farmcast"), final, wx):
+            print("publish: farm forecast numbers updated", flush=True)
+    except Exception as e:
+        print("publish: farm forecast failed:", e, flush=True)
+
+
 def enrich(index):
     """Give every aircraft named in an event its registration, type and the
     type's full name, for the map's detail card. Looked up at publish time,
@@ -964,6 +975,7 @@ def main():
     update_heat(index, final, index["meta"]["end"], wx)
     update_wide_heat(index, index["meta"]["end"])
     update_busy(final, index["meta"]["end"])
+    update_farm_forecast(final, index["meta"]["end"], wx)
     m = index["meta"]
     print(f"publish: {m['positions']} positions, {m['aircraft']} aircraft, "
           f"{m['mlat_positions']} MLAT positions, {m['aircraft_mlat_only']} aircraft seen only by MLAT, "

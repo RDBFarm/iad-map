@@ -12,19 +12,19 @@
    "from_kt": null,
    "to_kt": 0,
    "p": 0.04,
-   "hours": 347
+   "hours": 345
   },
   {
    "from_kt": 0,
    "to_kt": 2,
-   "p": 0.28,
-   "hours": 123
+   "p": 0.26,
+   "hours": 141
   },
   {
    "from_kt": 2,
    "to_kt": 4,
-   "p": 0.72,
-   "hours": 36
+   "p": 0.74,
+   "hours": 35
   },
   {
    "from_kt": 4,
@@ -38,29 +38,30 @@
   "N": 7.7
  },
  "hours": {
-  "counted": 674,
+  "counted": 675,
   "south": 162,
-  "north": 442,
+  "north": 443,
   "mixed": 18,
   "unclear": 52,
-  "with_wind": 659
+  "with_wind": 675
  },
+ "ready": true,
  "first": "2026-09-25",
  "last": "2026-10-23",
  "check": {
   "note": "the rule on the same weeks with the winds that blew, not forecasts",
-  "hourly_corr": 0.82,
-  "block_corr": 0.9,
-  "blocks": 101,
+  "hourly_corr": 0.81,
+  "block_corr": 0.89,
+  "blocks": 111,
   "quiet_blocks": {
    "n": 61,
    "median": 2,
    "max": 118
   },
   "busy_blocks": {
-   "n": 17,
+   "n": 21,
    "median": 109,
-   "min": 67
+   "min": 2
   }
  },
  "source": "tools/make_farm_model.py: the farm receiver's recorded paths (live-data t/ files) and KIAD METARs from the Iowa Environmental Mesonet"

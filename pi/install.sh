@@ -55,7 +55,7 @@ mkdir -p "$HOME_DIR" "$DATA_DIR" /opt/iad-map
 chown -R "$USER_NAME:$USER_NAME" "$HOME_DIR" "$DATA_DIR"
 
 echo "== Downloading the programs"
-for f in collector.py publish.py proximity.py farm.py alerts.py aircraft_lookup.py tracks.py heatmap.py netcheck.py busy.py aircraft_types.json operators.json watch.json watch_flights.json; do
+for f in collector.py publish.py proximity.py farm.py alerts.py aircraft_lookup.py tracks.py heatmap.py netcheck.py busy.py farmcast.py aircraft_types.json operators.json watch.json watch_flights.json; do
   curl -fsSL "$SRC/$f" -o "/opt/iad-map/$f"
 done
 chmod 755 /opt/iad-map/*.py; chmod 644 /opt/iad-map/*.json

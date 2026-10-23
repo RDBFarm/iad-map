@@ -86,6 +86,7 @@
       <thead><tr><th></th><th>Night<small>12–6a</small></th><th>Morning<small>6a–12p</small></th><th>Afternoon<small>12–6p</small></th><th>Evening<small>6p–12a</small></th></tr></thead>
       <tbody id="fc-blocks"></tbody>
     </table></div>
+    <div class="note" id="fc-record" style="margin-top:6px"></div>
     <h3>Hour by hour</h3>
     <div class="note">Brighter is more planes. Tap a day to chart it.</div>
     <canvas id="fc-grid" aria-label="Planes expected over the farm each hour, next 7 days"></canvas>
@@ -360,9 +361,11 @@ async function load() {
 
 // ---- The farm forecast. Dulles's usual landings for each hour (above) times
 // the share that pass over the farm for the way it is likely to be landing,
-// from the forecast wind at Dulles. The numbers are measured by
-// tools/make_farm_model.py (farm-model.json); the wind is Open-Meteo's, the
-// same forecast the farm's records site uses.
+// from the forecast wind at Dulles. The numbers are the Pi's (pi/farmcast.py,
+// farm-model.json on live-data, with the record of its kept forecasts) once
+// they cover two weeks, the repository's snapshot (tools/make_farm_model.py)
+// until then. The wind is Open-Meteo's, the same forecast the farm's records
+// site uses. pi/farmcast.py predict() is this arithmetic's twin, for scoring.
 const FC_URL = 'https://api.open-meteo.com/v1/forecast?latitude=38.9445&longitude=-77.4558' +
   '&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=kn&timezone=America%2FNew_York&timeformat=unixtime&forecast_days=7';
 const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -511,14 +514,31 @@ if (fcGrid) {
 }
 window.addEventListener('resize', () => { if (FCDAYS) { drawFcGrid(); drawFcBars(); } });
 
+// How the Pi's kept forecasts have done, or how far it has to go before its numbers are used
+function recordText(pi) {
+  if (!pi) return '';
+  if (!pi.ready) return `The Pi is counting its own numbers (${pi.hours.counted} of ${14 * 24} hours so far); ` +
+    'until then these come from a snapshot of the first four weeks.';
+  const rows = (pi.score ? pi.score.by_lead : []).filter(x => x.blocks >= 4);
+  if (!rows.length) return 'The Pi keeps each morning\'s forecast and checks it once the day is over; its record will show here.';
+  const name = l => l === 0 ? 'later the same day' : l === 1 ? 'the next day' : `${l} days ahead`;
+  const pick = [0, 1, 3, 6].map(l => rows.find(x => x.lead === l)).filter(Boolean);
+  const parts = pick.map((x, i) => i ? `${name(x.lead)} ${x.median_err}` : `${name(x.lead)} were off by a median of ${x.median_err} planes`);
+  return `How it has done (last ${pi.score.days} days): 6-hour blocks forecast ${parts.join('; ')}. ` +
+    `A typical block had ${pick[0].median_actual}.`;
+}
 async function loadForecast() {
   const note = document.getElementById('fc-note');
   if (!DATA.complete_days.length) { note.textContent = 'Needs a whole day of Dulles counts first.'; return; }
-  try {
-    const [m, om] = await Promise.all(['farm-model.json', FC_URL].map(async u => {
-      const r = await fetch(u); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }));
-    MODEL = m; FCDAYS = buildForecast(om);
-  } catch (e) { note.textContent = 'The wind forecast could not be loaded (' + e.message + ').'; return; }
+  const getJSON = async u => { const r = await fetch(u); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); };
+  const [pi, seed, om] = await Promise.allSettled([getJSON(DATA_BASE + 'farm-model.json?t=' + Date.now()),
+                                                    getJSON('farm-model.json'), getJSON(FC_URL)]);
+  const PI = pi.status === 'fulfilled' ? pi.value : null;
+  MODEL = PI && PI.ready ? PI : seed.status === 'fulfilled' ? seed.value : null;
+  const failed = [om, MODEL ? null : seed].find(x => x && x.status === 'rejected');
+  if (failed) { note.textContent = 'The wind forecast could not be loaded (' + failed.reason.message + ').'; return; }
+  FCDAYS = buildForecast(om.value);
+  document.getElementById('fc-record').textContent = recordText(PI);
   const pct = x => Math.round(x * 100);
   note.textContent = `Planes expected within ${MODEL.near_mi} miles of the farm, below ${MODEL.below_ft.toLocaleString()} ft. ` +
     `When Dulles lands to the south, ${pct(MODEL.share.S)}% of its arrivals pass over; landing north, ${pct(MODEL.share.N)}%. ` +
@@ -527,7 +547,8 @@ async function loadForecast() {
   const k = MODEL.check, hrs = MODEL.hours;
   document.getElementById('fc-about').textContent = `Counts planes passing within ${MODEL.near_mi} miles of the farm below ` +
     `${MODEL.below_ft.toLocaleString()} ft: Dulles's usual landings for that hour and weekday (from the counts below) times the ` +
-    `share that pass over the farm for the way it is likely to be landing. Measured ${fmtDay(MODEL.first)} – ${fmtDay(MODEL.last)}: ` +
+    `share that pass over the farm for the way it is likely to be landing. Measured ${fmtDay(MODEL.first)} – ${fmtDay(MODEL.last)} ` +
+    (MODEL.score ? '(kept up to date by the Pi)' : '(a snapshot)') + ': ' +
     `${hrs.south} hours landing south, ${hrs.north} north. Landing south was ${pct(MODEL.p_south[MODEL.p_south.length - 1].p)}% ` +
     `of hours with at least ${MODEL.p_south[MODEL.p_south.length - 1].from_kt} knots of wind from the south along the runways, ` +
     `${pct(MODEL.p_south[0].p)}% with any wind from the north. Checked on the same weeks with the winds that actually blew: ` +
