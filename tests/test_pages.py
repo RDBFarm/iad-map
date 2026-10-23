@@ -1,4 +1,4 @@
-"""The three pages in a real browser on the made-up data: they load without
+"""The pages in a real browser on the made-up data: they load without
 errors and show it. Needs Playwright with Chromium; skipped without it.
 
   PLAYWRIGHT_CHROMIUM=/path/to/chromium   use that browser binary
@@ -7,6 +7,7 @@ errors and show it. Needs Playwright with Chromium; skipped without it.
 import functools, http.server, os, threading, unittest
 
 import fixture as F
+import busy as B
 import heatmap as H
 import publish as P
 
@@ -25,6 +26,7 @@ def publish_fixture():
     for _ in range(3):
         H.update(F.WORK, P.heat_points_for_hour, F.NOW + 31 * 3600, os.path.join(F.DRIVE, "pages-heat"), db_start=start)
         H.update_wide(F.WORK, P.wide_points_for_hour, F.NOW, os.path.join(F.DRIVE, "pages-wide"), db_start=start)
+    B.update(F.WORK, F.NOW + 3 * 3600, os.path.join(F.DRIVE, "pages-busy"), final)
     return index
 
 
@@ -62,7 +64,7 @@ class Pages(unittest.TestCase):
         cls.site.shutdown()
         cls.data.shutdown()
 
-    def open(self, page_name, width=1280, height=800, hash_=""):
+    def open(self, page_name, width=1280, height=800, hash_="", data=None):
         pg = self.browser.new_page(viewport={"width": width, "height": height})
         errors = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
@@ -78,7 +80,7 @@ class Pages(unittest.TestCase):
                 return r.continue_()
             return r.abort()       # map tiles, radar: not needed, and must not make a test flaky
         pg.route("**/*", route)
-        pg.goto(f"{self.site_url}{page_name}?data={self.data_url}{hash_}", wait_until="load")
+        pg.goto(f"{self.site_url}{page_name}?data={data or self.data_url}{hash_}", wait_until="load")
         pg.wait_for_timeout(2500)
         return pg, errors
 
@@ -163,6 +165,29 @@ class Pages(unittest.TestCase):
                          pg.evaluate("BEACONS.length"))
         self.assertEqual(errors, [])
         pg.close()
+
+    def test_busy_times_from_the_pi(self):
+        pg, errors = self.open("busy.html")
+        self.assertEqual(errors, [])
+        self.assertIn("Counted by the farm's receiver", pg.inner_text("#status"))
+        self.assertIn("0 whole days", pg.inner_text("#status"))   # the made-up log is three hours
+        self.assertIn("no whole days yet", pg.inner_text("#tbl"))
+        pg.close()
+
+    def test_busy_times_snapshot_until_the_pi_has_published(self):
+        for width in (1280, 390):
+            pg, errors = self.open("busy.html", width=width, data=self.site_url + "no-such-branch/")
+            self.assertEqual(errors, [], f"busy.html at {width}px")
+            self.assertIn("snapshot", pg.inner_text("#status"))
+            self.assertIn("27 whole days", pg.inner_text("#status"))
+            first = pg.inner_text("#tbl tr")
+            self.assertIn("Every day", first)
+            self.assertIn("3:30\u20134:30 PM", first)
+            self.assertLessEqual(pg.evaluate("document.documentElement.scrollWidth"), width)
+            pg.click("[data-kind=d]")
+            self.assertNotEqual(pg.inner_text("#tbl tr"), first)
+            self.assertEqual(errors, [])
+            pg.close()
 
 
 if __name__ == "__main__":

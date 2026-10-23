@@ -48,6 +48,9 @@ The "Last 24 hours" label is a day picker: any of the last 30 finished days
 aircraft size, built once a day on the Pi by `pi/heatmap.py`. Its "Wide" button
 shows everything the receiver hears, at every height, 200 miles out, with the
 FAA's radio beacons marked (`beacons.js`, built by `tools/make_beacons.py`).
+`busy.html` shows when Dulles is busiest: every landing and take-off the
+receiver heard, per 15 minutes of Eastern time, averaged by day of the week
+(`pi/busy.py`, counted on the Pi as each hour ends).
 `flights.html` is the same map without anything about the farm, built from
 `live.html` by `tools/make_public.py` (never edit it by hand).
 Tapping a dot on any route opens the same card for that aircraft. The panel
@@ -115,8 +118,8 @@ renews the network connection, at most hourly. On the Pi:
     python3 -m unittest discover -s tests -v
 
 A made-up three-hour receiver log (`tests/fixture.py`) goes through the
-publisher, both history heat maps and the alert rules, and the three pages are
-opened in Chromium on what it produced (skipped when Playwright isn't
+publisher, both history heat maps, the busy-times counts and the alert rules,
+and the pages are opened in Chromium on what it produced (skipped when Playwright isn't
 installed). The installer is checked too: it must download every file the Pi
 programs import or read. GitHub runs them on every pull request and push.
 

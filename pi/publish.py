@@ -45,6 +45,7 @@ import calendar, datetime, hashlib, json, math, os, re, sqlite3, subprocess, sys
 from zoneinfo import ZoneInfo
 
 import aircraft_lookup
+import busy
 import farm
 import heatmap
 import proximity
@@ -910,6 +911,16 @@ def update_wide_heat(index, now):
         print("publish: wide heat map failed:", e, flush=True)
 
 
+def update_busy(final, now):
+    """Dulles landings and take-offs per quarter-hour (busy.py) for busy.html,
+    from the frozen t/ files. Never stops the map."""
+    try:
+        if busy.update(WORK_DIR, now, os.path.join(os.path.dirname(DB_PATH), "busy"), final):
+            print("publish: busy times updated", flush=True)
+    except Exception as e:
+        print("publish: busy times failed:", e, flush=True)
+
+
 def enrich(index):
     """Give every aircraft named in an event its registration, type and the
     type's full name, for the map's detail card. Looked up at publish time,
@@ -952,6 +963,7 @@ def main():
     final = archive(index, files, final | (frozen - set(files)), index["meta"]["end"])
     update_heat(index, final, index["meta"]["end"], wx)
     update_wide_heat(index, index["meta"]["end"])
+    update_busy(final, index["meta"]["end"])
     m = index["meta"]
     print(f"publish: {m['positions']} positions, {m['aircraft']} aircraft, "
           f"{m['mlat_positions']} MLAT positions, {m['aircraft_mlat_only']} aircraft seen only by MLAT, "
