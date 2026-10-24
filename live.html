@@ -1124,8 +1124,9 @@ function isArrivalPt(p) {
   }
   // No baro_rate — use heading alignment against all runways
   if (gs > 200 && alt > 500 && alt < 8000) {
-    const runways = [19,199,120,300, 19,199,150,330, 100,280,150,330,
-                     170,350, 140,320, 160,340, 150,330, 10,190, 20,200];
+    // true headings, the same table as pi/publish.py AIRPORT_RUNWAYS
+    const runways = [1,181,110.6,290.6, 356,176,26,206,142.7,322.7, 94.2,274.2,33,213,144.2,324.2,
+                     161,341, 127.4,307.4, 150.6,330.6, 139.2,319.2, 360,180, 15,195];
     const bestAlign = Math.min(...runways.map(r => {
       let d = Math.abs(track - r) % 360;
       return d > 180 ? 360 - d : d;

@@ -194,6 +194,7 @@ def update(db_path, events_dir, now=None, altim_at=None):
     lons = [p[1] for p in PARCEL]
     pad = 0.02   # about a mile: positions just outside still form segments across it
     db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=60)
+    db.execute("PRAGMA temp_store = MEMORY")      # the ORDER BY's sort stays off the SD card
     logged, stop = 0, int(now - COMMIT_LAG_S)
     while state["done_until"] < stop:
         a = state["done_until"]

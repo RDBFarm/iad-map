@@ -79,6 +79,28 @@ class HeatMaps(unittest.TestCase):
         lit = set().union(*(set(c) for c in parts.values()))
         self.assertEqual(set(by_cell), lit)
 
+    def test_an_hour_takes_the_report_nearest_its_middle(self):
+        # Publish runs every 15 min, so an hour's first run only holds the
+        # :52 report of the hour before (38 min from the middle); the hour's
+        # own :52 report (22 min) comes an hour later and must replace it.
+        # Until 2026-10-24 the first seen was kept, so every hour went into
+        # the wind grid of the hour before it.
+        st = H.State(tempfile.mkdtemp(prefix="iadmap-wind-"))
+        h = F.T0
+        before = {"epoch": h - 8 * 60, "drct": 350, "sknt": 8, "compass": "N"}
+        own = {"epoch": h + 52 * 60, "drct": 10, "sknt": 8, "compass": "N"}
+        H.take_winds(st, [before])
+        self.assertEqual(st.s["wind"][str(h)], 350)
+        H.take_winds(st, [before, own])
+        self.assertEqual(st.s["wind"][str(h)], 10)
+        H.take_winds(st, [before])                   # a later run that only has the earlier one
+        self.assertEqual(st.s["wind"][str(h)], 10)
+        st.done.add(h)                               # counted into a grid: keeps the wind it was counted under
+        H.take_winds(st, [{"epoch": h + 1800, "drct": 90, "sknt": 8, "compass": "E"}])
+        self.assertEqual(st.s["wind"][str(h)], 10)
+        st.save()
+        self.assertEqual(H.State(st.dir).s["wind_d"][str(h)], 22 * 60)
+
     def test_same_log_same_images(self):
         other = tempfile.mkdtemp(prefix="iadmap-heat2-")
         try:
