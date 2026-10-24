@@ -8,189 +8,112 @@ than assuming.
 
 ---
 
-## 0. Start here — status as of 2026-10-24
+## 0. Start here — status as of 2026-10-24 (evening)
 
 **Running on the Pi** (systemd): `iad-map-collector` (logs every aircraft heard,
 every 2 s), `iad-map-alerts` (emergency squawks, low passes, sightings → GitHub
-issue + text message), `iad-map-publish.timer` (every 15 min → `live-data`:
-the live map, 30 days of hours, both history heat maps, the busy-times counts
-`busy.json` and the farm forecast's numbers and record `farm-model.json`), `iad-map-aircraft-db.timer`
-(monthly type lookup), `iad-map-netcheck.timer` (every 5 min, from 10-22: name
-lookups, diagnosis, self-renewal; see "Lookup outage"). Each upload carries the installed version in
-`live.json` `meta.pi_version` (from 10-18; written by the installer). **Installed 10-23: 7ceb6ab**
-(busy times and the farm forecast with scoring); by 9:16 PM it had counted 27 whole days for
-`busy.json` and 679 hours for `farm-model.json` (`"ready": true`, every hour with a wind) and kept
-its first forecast (10-23 evening).
+issue + text message), `iad-map-publish.timer` (every 15 min → `live-data`: the
+live map's arrivals `h/` and, from 10-24, take-offs `o/`, whole tracks `t/`, 30
+days of each, the day files `d/`, both history heat maps, `busy.json`,
+`farm-model.json`), `iad-map-aircraft-db.timer` (monthly type lookup),
+`iad-map-netcheck.timer` (every 5 min, from 10-22: name lookups, diagnosis,
+self-renewal; "Lookup outage" below). `live.json` `meta.pi_version` says what is
+installed. **Installed 10-24 (~12:30 PM EDT): 112f2bc** — everything merged that
+day (#88–#91 below); `PRAGMA auto_vacuum` on the real log printed `(2,)`.
 
 **Pages** (GitHub Pages, from `main`): `live.html` (75 miles, under 15,000 ft;
-day picker for 30 days), `flights.html` (the same without the farm, built by
-`tools/make_public.py`), `heat.html` (history: near = 50 mi under 15,000 ft
-with wind/airport/take-off choices; Wide = 200 mi, every height, radio beacons), `busy.html` (landings and take-offs at Dulles per
-15 minutes, by day of the week; from 10-23; with a 7-day forecast of planes over
-the farm, left off as `busy.html?public` from `flights.html`). Every page's header
-carries the same page buttons — Live map, History, Busy times — since 10-24 (his
-request: "have the same buttons on the live page show up on the other pages as
-well"; before, the history and busy pages only linked back to the live map).
+day picker for 30 days; Arrivals / Take-offs / Both from 10-24), `flights.html`
+(the same without the farm, built by `tools/make_public.py`), `heat.html`
+(history: near = 50 mi under 15,000 ft with wind/airport/take-off choices; Wide
+= 200 mi, every height, radio beacons), `busy.html` (landings and take-offs at
+Dulles per 15 minutes by weekday, with the 7-day farm forecast; `busy.html?public`
+from `flights.html`). Every header carries Live map / History / Busy times
+(10-24, his request). Page changes need nothing on the Pi.
 
-**Tests:** `python3 -m unittest discover -s tests -v` (73 tests, ~2 min;
-the page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`
+**Tests:** `python3 -m unittest discover -s tests -v` (73 tests, ~2 min; the
+page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`,
 and `LEAFLET_DIST=<leaflet dist folder>` when there is no network). They run on
 every PR and push (`.github/workflows/tests.yml`). `tests/fixture.py` is a
-made-up 3-hour log; extend it rather than building one-off test setups in a
-scratchpad, which is what every change before 10-18 did. **When a bug is fixed,
-add the test that would have caught it.**
+made-up 3-hour log; extend it rather than building one-off setups. **When a bug
+is fixed, add the test that would have caught it.**
 
 **Measured over a month (09-26 – 10-18):** every hour file present (563; two
 3 AM hours thin); 16 alerts (7 emergency squawks, 7 sightings, 1 low pass, 1
 test); repo 363 MB compressed with the 30-day window.
 
-**Still open:** drive growth per day and publisher memory on the real Pi were
-never measured (he declined self-reporting health for now, 10-18); close-
-approach thresholds (first guesses; he only sees jets ones). **Farm forecast, new 10-23:** the first scores
-(`score.by_lead` in `farm-model.json`) should appear from 10-24; the page shows a line once
-a lead has 4 scored blocks. The rule's choices (2 mi, 6,000 ft, blocks) are mine, not yet confirmed.
-**Scheduled tasks** (each starts its own session; moved off the 10-14–10-24 session
-when it was archived): 10-25 10 AM (are the scores coming in), 11-19 (UA 2853 on
-11-21: wind, seat, the light at the farm; re-check the middle runway), 2027-01-15
-(777-9 deliveries: drop `B779`).
+**Still open** (not ranked; nothing is blocking):
+- **The arrival/take-off rule.** 69% of KIAD take-offs keep their climb in the
+  *arrival* files (1,545 of 2,227 over 5 real days; 4.7% of live-map points):
+  39% are first heard above 500 ft so the climb rule never starts, and
+  GA-flagged points (60% of all) skip the filter. The 10-24 toggle shows the
+  split as the rules make it — he looked and said the take-offs "look just like
+  I would imagine they would" — it does not fix the rule. A better rule is
+  judged against the busy rule's take-offs (the review's method).
+- **Publisher memory and drive growth on the real Pi** were never measured (he
+  declined self-reporting health, 10-18). `publish.py` loads the whole 24 h
+  window every run: 1.04 M in-area points, ~660–760 MB RSS on a synthetic log
+  that size (sandbox) — the floor on a 2 GB Pi; querying only unfrozen hours
+  is a medium–large change, not done.
+- Two medium speed items: `pi/notable.json` (1.87 MB raw, 193 KB gzipped) is
+  fetched up front by `live.html`; `heat.html`'s `paint()` goes through a
+  base64 data URL (~310–380 ms a paint; now debounced).
+- Close-approach thresholds (first guesses; he only sees jets ones).
+- **Farm forecast:** the first scores (`score.by_lead` in `farm-model.json`)
+  from 10-24; the page shows a line once a lead has 4 scored blocks. Its
+  choices (2 mi, 6,000 ft, 6-hour blocks) were mine; on 10-24 he made that
+  measure the live map's headline too (below).
+- **Scheduled tasks** (each starts its own session): 10-25 10 AM (are the
+  scores coming in), 11-19 (UA 2853 on 11-21: wind, seat, the light at the
+  farm; re-check the middle runway), 2027-01-15 (777-9 deliveries: drop `B779`).
 
-### Review of 10-23/24 (speed, accuracy, usability) — what it found and what changed
+### What changed on 10-24 (a review he asked for, then his decisions; PRs #88–#93)
 Three parallel reviews (the Pi programs, the pages, the rules run over 6 real
-days of `t/` files, 10-16 and 10-18 – 10-22); every number below was measured.
-**First PR (#88, Pi side, merged 10-24 ~3:15 AM EDT; needs the installer run):**
-- **Runway headings were a typo, not magnetic vs true:** `AIRPORT_RUNWAYS`
-  held runway *numbers* read as degrees (KIAD "01/19" as 19/199). True
-  headings are 1°/181° (OurAirports; real finals measure 180.8° / 0.7°). The
-  18° penalty scored 21.7% of KIAD landers' own short-final points "en route"
-  (12.9% with the right table; 2.1% of all live-map points change airport —
-  en route→KIAD 24,612, →KBWI 14,862, →KDCA 11,652). Affects airport toggles
-  and the heat map's by-airport split only; the arrival filter's heading rule
-  runs on 0.36% of points (those without a vertical rate) and misclassified 0.
-  Hours already frozen keep the old labels.
-- **Heat map wind:** every hour had gone into the wind grid of the hour
-  before (the :52 report before the hour was seen first and kept); now an
-  hour not yet counted takes the nearest report. Hours counted before
-  10-24 stay where they are (not re-sorted: it would mean rebuilding every
-  hour from the log, and the two reports are an hour apart).
-- **A day's weather lost for good** when the fetch failed the night its
-  `d/` file was built (`d/2026-10-21.json` has 0 reports; neighbours 24).
-  Now the day file waits for its weather, up to `WX_RETRY_DAYS` = 3, and a
-  recent day already on disk without weather is built again.
-- **Pruning could empty the whole log:** the loop deleted a day at a time
-  until 15 GB was free with nothing checking that space came back — and it
-  does not while a publish query holds the WAL (free space *falls*). With
-  free space pinned at 9 GB one call deleted all 3 fixture days. Now one
-  hour per call, again at the next commit while it helps, and it stops when
-  a deletion freed nothing. The drive was 11% full on 10-21, so this had
-  not fired. **Check on the Pi once:** `sudo -u iadmap python3 -c "import sqlite3;print(sqlite3.connect('file:/mnt/flightdata/iad-map/flights.db?mode=ro',uri=True).execute('PRAGMA auto_vacuum').fetchone())"` should print `(2,)`; `(0,)` would mean deleting never returns space.
-- **The collector lost up to 30 s of readings at every stop** (no SIGTERM
-  handler: measured 0 rows saved); every installer re-run and reboot. It
-  now saves the buffer on the way out.
-- Sorts in `tracks.hour_file` and `farm.update` went through a temp file
-  (likely the SD card; ~18 MB a run): `PRAGMA temp_store = MEMORY`, as the
-  wide map already had. Hour files are written whole (`.tmp` + rename) and an
-  empty one is no longer final.
-- Measured, not changed: the publisher loads the whole 24 h window every run
-  (1.04 M in-area points, ~660–760 MB RSS on a synthetic log of that size,
-  sandbox) — the floor on a 2 GB Pi; querying only unfrozen hours is a
-  medium–large change, not done.
-**Second PR (#89, pages, merged 10-24 ~3:30 AM EDT; nothing on the Pi):**
-- **Phone layout, measured at 390 × 844:** the ≤600 px block grew the control
-  bar to 168 px but left the legend, weather card and event card at the
-  desktop's `bottom:138/162px` — 30 px inside the bar, and the legend and
-  weather card 114 × 87 px over each other (210 + 160 px minimum widths plus
-  margins = 398 > 390). Now side by side at half width, `bottom:184px`, the
-  bar 176 px (buttons 40 px high). The panels under the header start at its
-  *measured* height (`--hdr`, a ResizeObserver): when the subtitle wraps —
-  the "Pi may be offline" note at 1280 px — they sat 25 px inside it. A long
-  search list scrolls instead of reaching the legend. `test_panels_stay_clear_of_each_other`
-  measures every pair at both widths, with results, with a card, with a wrapped header.
-- **Day map:** `toggleMapStyle()` recoloured the elements it listed; the panel
-  headings ("Flight Search", "Events"), search rows and legend text stayed
-  light on the light panels. `body.day` + CSS covers them now (`test_day_map_text_is_readable`).
-- Taps 40 px high on a phone (header and bar buttons, category and airport
-  rows, search rows; Apple's 44 would cost another row of the map); text
-  floor 0.7 rem (11 px) — six classes were 9.9–10.9 px.
-- **One missing hour file no longer fails the whole first load** (`Promise.allSettled`):
-  the map draws the rest and says "N hours missing, retrying at the next
-  refresh". raw.githubusercontent can serve a new `live.json` before a
-  brand-new hour file.
-- Weather card before the first report of the window says "first report
-  9:52 PM" instead of showing it (it read "@ 09:52 PM" at 9:30 PM). Search
-  rows show the type's name (was hover-only). "N passes by M aircraft" on the
-  farm summary (`summary.aircraft` counts passes; 51 on 10-18 were 49
-  aircraft). `busy.html`: midnight read "12:00 PM" (`quarter(96)`); a block
-  already part over says "from 9p" on the chip, not only on hover; the
-  pressed button carries a ✓ and `aria-pressed`, not only a tint;
-  `recordText` no longer throws when no shown lead has 4 blocks.
-  `heat.html`: a missing image says "no image published for this choice
-  yet" instead of the browser's decode error.
-**Third PR (#90, speed, merged 10-24; nothing on the Pi).** Measured in the
-sandbox's Chromium on the real 10-23 files (860,722 points, 25 hour files,
-12.6 MB gzipped), before → after; an iPad is slower by a factor not measured:
-- **First open draws as the hour files arrive, newest first** (`showIndex`
-  progressive path, `assemblePoints`): the map stayed empty until the slowest
-  of 25 files had landed. Local server: first points at 2,062 → 492–836 ms;
-  **over a throttled 4 Mbit/s link, 90.3 s → 13.9 s** (all files still take
-  90 s; "loading, N of 25 hours…" meanwhile). A refresh of the view already
-  shown waits for all files as before.
-- **A tapped flight fetches the track files its own points span ± 1 h**,
-  widening while the airborne path reaches a file's edge (`trackFilesFor`):
-  25 files (9.7 MB) were fetched to draw one path. Now 3 for a single visit;
-  an airframe heard in stretches across the day (UAL2677's, 19 h on the map)
-  still needs 20, and that is its path. A card that names an address draws
-  that aircraft only (UAL1017 was two airframes that day; both were drawn).
-  Parked-on-the-ground points do not widen the fetch.
-- **Search** 87–110 → 18–42 ms a keystroke (`searchResults` marked matches
-  per aircraft in a Uint8Array instead of building a 7-element array per
-  point; the input is debounced 120 ms, so typing "Bonanza" runs it once, not
-  seven times). **Redraw** at the 30-minute window 195 → 141–155 ms (a
-  256-entry altitude→colour table instead of `altColor()` per point; the
-  search match per aircraft, not per point; the visible count taken from
-  `draw()` instead of selecting the points a second time); 8-minute window
-  27 → 18–21 ms.
-- `heat.html`: the contrast slider repaints once the thumb has rested 80 ms
-  (`paint()` is ~310–380 ms: 2.1 M cells and a PNG re-encode, and it fired
-  per pixel moved; the paint itself is unchanged).
-- Not done (medium each, noted by the review): `pi/notable.json` (1.87 MB
-  raw, 193 KB gzipped) is still fetched up front; `paint()` still goes
-  through a base64 data URL.
-**His decisions, 10-24 ~4 AM ("Include 2 and 3"), built in the fourth PR
-(Pi side: needs the installer):**
-- **(#2) Take-offs on the live map: a toggle, the heat map's words**
-  (Arrivals / Take-offs / Both, top of the ✈ panel, remembered per browser).
-  Take-offs are the airborne positions the arrival rules drop — the heat
-  map's definition — in their own hour files `o/<day>/<HH>.json`
-  (`live.json` `deps`, `d/` files too), so a map of arrivals downloads what
-  it did before; the files are fetched when Take-offs or Both is chosen.
-  Hours frozen before the install have none; the header says "take-offs from
-  <time>" (or that none are recorded for a past day). The page's own copy of
-  the arrival rule (`isArrivalPt`) is gone: the Pi decides. **Still true:**
-  69% of KIAD take-offs keep their climb in the *arrival* files (1,545 of
-  2,227; 4.7% of points): 39% are first heard above 500 ft so the climb rule
-  never starts, and GA-flagged points (60% of all) skip the filter. The
-  toggle shows the split as the rules make it; it does not fix the rule.
-  **Installed 10-24 (112f2bc, by 12:45 PM EDT) and checked by him on the live
-  map:** "the take offs look just like I would imagine they would."
-  A better rule can be judged against the busy rule's take-offs (the review's
-  method, `q2_arr_dep.py`); not attempted.
-- **(#3) One farm rule, the forecast's:** the live map's headline is now
-  "N planes within 2 mi below 6,000 ft (what the forecast counts; props
-  included)" — `farm.near` in `live.json` and the `d/` files
-  (`publish.near_summary`: farmcast's per-hour records where it has them,
-  this run's `t/` files for the rest; counted per hour file as the forecast
-  counts, so an aircraft crossing an hour boundary counts in both, ≤1.3%).
-  The parcel figure stays underneath as "Over the land itself: N passes by M
-  aircraft …" (his 09-24 rule: the land, props left out, the low-pass
-  highlights and alerts). The forecast page's wording was already his.
-- Also his, same hour: on `busy.html` the bars began 34 px left of the grid
-  above them ("12am slightly left of 12am"); both bar charts now use the
-  grid's gutter (`GRID.left` / `FCG.left`), so an hour sits under the same hour.
-Also measured: the busy rule reproduces `busy.json` exactly and balances
-(2,178 landings / 2,227 take-offs over 5 days); its error is reception —
-5.8% of landings and 8.0% of take-offs vanish or appear at 1,500–5,000 ft and
-are never counted; double counts ≤4 in 4,405. Type lookup: 66 of 11,121
-aircraft untyped (0.6%), corporate callsigns, not airlines.
+days of `t/` files); every number was measured, and each fix has a test.
+- **Pi (#88).** The runway table held runway *numbers* read as degrees (KIAD
+  "01/19" as 19/199); now true headings (OurAirports; real finals measure
+  180.8°/0.7°) — 21.7% of Dulles's own short-final points had scored "en
+  route"; frozen hours keep the old labels. The heat map's hour takes the wind
+  report nearest its middle (every hour had gone into the *previous* hour's
+  wind grid; hours counted before 10-24 stay there). A day file waits for its
+  weather (`WX_RETRY_DAYS` = 3; `d/2026-10-21.json` went out with none).
+  Pruning deletes one hour per call and stops when a deletion freed nothing
+  (it looped a day at a time and could empty the log while a publish query
+  held the WAL). The collector saves its buffer on SIGTERM (0 rows were saved
+  at every restart). `PRAGMA temp_store = MEMORY` for the tracks and farm
+  sorts; hour files written whole; an empty final file is rebuilt.
+- **Pages (#89).** Phone layout measured at 390 × 844: the legend and weather
+  card sat 30 px inside the control bar and 114 px over each other; now side
+  by side above a 176 px bar, and the panels follow the header's measured
+  height (`--hdr`). A long search list scrolls. Day map readable (`body.day`).
+  Taps 40 px, text floor 11 px. One missing hour file no longer blanks the
+  load ("N hours missing, retrying"). Weather card before the first report;
+  type names on search rows; "N passes by M aircraft"; `busy.html` midnight
+  label, "from 9p" chips, ✓ on the pressed button; `heat.html` missing-image
+  wording. `test_panels_stay_clear_of_each_other` measures every panel pair.
+- **Speed (#90), before → after on the real 10-23 files.** First points
+  2,062 → 492–836 ms locally and **90.3 → 13.9 s on a 4 Mbit/s link** (the
+  map draws as hour files arrive, newest first). A tapped flight fetches the
+  track files its points span ± 1 h, widening at a file's edge on airborne
+  points: 25 files → 3 for a single visit; a card naming an address draws that
+  aircraft only. Search 87–110 → 18–42 ms a keystroke; redraw at the 30-min
+  window 195 → 141–155 ms; the heat contrast slider repaints once the thumb
+  rests. The page's own copy of the arrival rule is gone (#91): the Pi decides.
+- **His decisions (#91, "Include 2 and 3").** Take-offs on the live map as a
+  toggle in the heat map's words, the airborne positions the arrival rules
+  drop, in `o/<day>/<HH>.json` fetched only when shown; hours before the
+  install have none and the header says so. One farm rule — the live map's
+  headline is the forecast's measure, "N planes within 2 mi below 6,000 ft
+  (what the forecast counts; props included)" (`farm.near` in `live.json` and
+  the `d/` files, `publish.near_summary`: farmcast's per-hour records where it
+  has them, this run's `t/` files for the rest); the parcel figure stays
+  underneath as "Over the land itself" and still drives the passes, highlights
+  and alerts. `busy.html`'s bars now use the grid's gutter ("12am slightly left
+  of 12am"). **(#93)** the same page buttons on every header.
+- **Also measured, unchanged:** the busy rule reproduces `busy.json` exactly
+  and balances (2,178 landings / 2,227 take-offs over 5 days); its error is
+  reception — 5.8% of landings and 8.0% of take-offs vanish or appear at
+  1,500–5,000 ft and are never counted; double counts ≤4 in 4,405. Type lookup:
+  66 of 11,121 aircraft untyped (0.6%), corporate callsigns, not airlines.
 
 ### How to change something on the Pi
 All Pi code is in `pi/` on `main`. Merge the change, then have him run on
@@ -363,7 +286,7 @@ See `README.md` for how to install. In short:
 - **The office is not to go on the map** — the property line is already there.
 
 ### Settled 10-24
-- **Runway headings:** the copied table held runway *numbers* read as degrees (KIAD 19/199); neither true nor magnetic. Replaced with true headings (OurAirports), which real finals confirm (§0, review). The same table sits in `live.html` (`isArrivalPt`).
+- **Runway headings:** the copied table held runway *numbers* read as degrees (KIAD 19/199); neither true nor magnetic. Replaced with true headings (OurAirports), which real finals confirm (§0). The page's copy of the rule (`isArrivalPt`) was removed on 10-24: the Pi decides.
 
 ### After installing, check
 - Done 09-24: aircraft types come through (via the lookup); the aviationweather.gov weather feed parses.
