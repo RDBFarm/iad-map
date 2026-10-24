@@ -31,12 +31,14 @@ def hour_name(kind, hour):
     return f"{kind}/{time.strftime('%Y%m%d', g)}/{time.strftime('%H', g)}.json"
 
 
-_NAME = re.compile(r"^([ht])/(\d{8})/?(\d{2})\.json$")
+_NAME = re.compile(r"^([hto])/(\d{8})/?(\d{2})\.json$")
 
 
 def parse_name(name):
-    """(kind, hour start) for an hour file name, in the folder layout or the
-    flat h/<YYYYMMDDHH>.json one used until 2026-09-26; None otherwise."""
+    """(kind, hour start) for an hour file name -- h/ the live map's
+    arrivals, t/ whole tracks, o/ take-offs (from 10-24) -- in the folder
+    layout or the flat h/<YYYYMMDDHH>.json one used until 2026-09-26; None
+    otherwise."""
     m = _NAME.match(name)
     if not m:
         return None

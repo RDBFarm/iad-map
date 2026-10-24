@@ -125,13 +125,20 @@
   .cat-count { font-size:0.7rem; color:#889; }
   #cat-off { color:#ff9f40; font-weight:normal; }
   .cat-caret { display:none; }
+  /* Arrivals / Take-offs / Both, the heat map's words (10-24) */
+  #mov-row { display:flex; gap:4px; margin-bottom:6px; }
+  #mov-row .btn { padding:3px 8px; font-size:0.7rem; }
+  #mov-row .btn.active::before { content:"✓ "; }
   /* phone: the panel folds to a button so it doesn't sit under the search box */
   @media (max-width: 600px) {
     #ap-panel { right:10px; min-width:0; padding:8px 10px; z-index:1002; }
     #ap-panel h3 { cursor:pointer; margin-bottom:0; }
     #ap-panel.open h3 { margin-bottom:8px; }
     .cat-caret { display:inline; }
-    #ap-panel:not(.open) #cat-list, #ap-panel:not(.open) #ap-more { display:none; }
+    #ap-panel:not(.open) #mov-row, #ap-panel:not(.open) #cat-list, #ap-panel:not(.open) #ap-more { display:none; }
+    /* stacked: in a row the three buttons widened the open panel over the search box */
+    #mov-row { flex-direction:column; gap:2px; }
+    #mov-row .btn { min-height:36px; }
   }
   .ap-toggle {
     display:flex; align-items:center; gap:8px;
@@ -194,6 +201,8 @@
   #search-clear-btn { padding:2px 8px; font-size:0.68rem; }
   #events h3 { margin-top:10px; }
   #events-note { color:#7788aa; font-size:0.7rem; margin-top:3px; }
+  .farm-why { color:#7788aa; font-size:0.7rem; }
+  .farm-why a { color:#7ec8e3; }
   /* event markers: shape and text carry the meaning, not colour */
   .ev-icon div { background:#fff; color:#111; border:1.5px solid #111; border-radius:4px;
     padding:1px 5px; font-size:0.7rem; font-weight:700; white-space:nowrap;
@@ -248,7 +257,7 @@
   body.day #search-panel, body.day #ap-panel, body.day #leg, body.day #events-list { color:#223; }
   body.day #search-panel h3, body.day #leg h3, body.day #ap-panel h3 { color:#223; }
   body.day .sr-time, body.day .sr-type, body.day .sr-name, body.day #events-note, body.day #search-count,
-  body.day .cat-count, body.day #ap-more summary, body.day .ctrl-lbl, body.day .leg-note, body.day .gl { color:#445566; }
+  body.day .cat-count, body.day #ap-more summary, body.day .ctrl-lbl, body.day .leg-note, body.day .gl, body.day .farm-why { color:#445566; }
   body.day .sr-flight, body.day .btn { color:#1565a8; }
   body.day #search-input::placeholder { color:#667; }
   html, body { overflow-x:hidden; }
@@ -357,6 +366,7 @@
 
 <div id="ap-panel">
   <h3 onclick="document.getElementById('ap-panel').classList.toggle('open')">✈ Show<span id="cat-off"></span><span class="cat-caret"> ▾</span></h3>
+  <div id="mov-row"></div>
   <div id="cat-list"></div>
   <details id="ap-more">
   <summary>Airports</summary>
@@ -725,6 +735,38 @@ const CATEGORIES = [
   ['military', 'Military'], ['fighter', 'Military fighters'], ['experimental', 'Experimental'],
 ];
 const activeCat = new Set(CATEGORIES.map(c => c[0]));
+// Arrivals / Take-offs / Both (owner, 10-24: "a toggle like the heat map's").
+// Arrivals are the map as before (h/ files). Take-offs are the airborne
+// positions its take-off rules drop -- the heat map's definition -- in o/
+// files the Pi writes from 10-24 (pi/publish.py); hours frozen before then
+// have none, and the header says from when they exist. Remembered per browser.
+let MOV = 'a', CUR_INDEX = null;
+try { MOV = localStorage.getItem('iadmap.mov') || 'a'; } catch (e) {}
+if (!['a', 'd', 'ad'].includes(MOV)) MOV = 'a';
+const MOV_SHOW = () => ({a: [1, 0], d: [0, 1], ad: [1, 1]})[MOV];
+function setMov(m) {
+  MOV = m;
+  try { localStorage.setItem('iadmap.mov', m); } catch (e) {}
+  drawMovRow();
+  if (CUR_INDEX) {
+    if (m !== 'a') document.getElementById('updated').textContent = 'loading take-offs…';
+    showIndex(CUR_INDEX, CUR_VIEW === 'live');
+  }
+}
+function drawMovRow() {
+  document.getElementById('mov-row').innerHTML = [['a', 'Arrivals'], ['d', 'Take-offs'], ['ad', 'Both']].map(([m, l]) =>
+    `<button class="btn${MOV === m ? ' active' : ''}" aria-pressed="${MOV === m}" onclick="setMov('${m}')">${l}</button>`).join('');
+}
+drawMovRow();
+// what the header says about take-offs: hours frozen before 10-24 have no o/ file
+function takeoffNote() {
+  if (MOV === 'a' || !CUR_INDEX) return '';
+  const d = CUR_INDEX.deps || [], h = CUR_INDEX.chunks || [];
+  if (!d.length) return ' — no take-offs recorded for this period (kept from the 10-24 install on)';
+  if (d.length >= h.length) return '';
+  const first = Math.min(...d.map(c => trackHour(c.name)));
+  return ' — take-offs from ' + FMT_TIME.format(new Date(first * 1000)).replace(/^0/, '');
+}
 const FIGHTER_TYPES = new Set(['F4', 'F5', 'F14', 'F15', 'F16', 'F16X', 'F18H', 'F18S', 'F22', 'F35',
   'F104', 'F111', 'F117', 'A10', 'T38', 'EUFI', 'RFAL', 'TOR', 'HAWK']);
 const PROTOTYPE_TYPES = new Set(['X2', 'X3', 'X29', 'X32', 'X47B', 'X49', 'X55', 'X59', 'XB1', 'JAS4',
@@ -1157,42 +1199,14 @@ function lowerBound(val) {
   while(lo<hi) { const mid=(lo+hi)>>1; PTS.tmin[mid]<val ? lo=mid+1 : hi=mid; }
   return lo;
 }
-function isArrivalPt(p) {
-  // GA points — always show (p[11]: render_github.py's GA test, set by the Pi)
-  if (p[11] || p.length < 7) return true;
-  const alt      = p[8]  || 0;
-  const gs       = p[7]  || 0;
-  const track    = p[9]  || 0;
-  const baroRate = p[10] || 0;
-  // On or near ground — keep only if rolling out (fast enough)
-  if (alt < 200) return gs > 40;
-  // Have baro_rate — use it definitively
-  if (baroRate !== 0) {
-    // Climbing fast at jet speed above 500ft = departure
-    if (baroRate > 500 && gs > 180 && alt > 500) return false;
-    // Descending = arrival
-    if (baroRate < -200) return true;
-  }
-  // No baro_rate — use heading alignment against all runways
-  if (gs > 200 && alt > 500 && alt < 8000) {
-    // true headings, the same table as pi/publish.py AIRPORT_RUNWAYS
-    const runways = [1,181,110.6,290.6, 356,176,26,206,142.7,322.7, 94.2,274.2,33,213,144.2,324.2,
-                     161,341, 127.4,307.4, 150.6,330.6, 139.2,319.2, 360,180, 15,195];
-    const bestAlign = Math.min(...runways.map(r => {
-      let d = Math.abs(track - r) % 360;
-      return d > 180 ? 360 - d : d;
-    }));
-    if (bestAlign > 60) return false;
-  }
-  return true;
-}
-
 function getPtsInRange(lo, hi) {
-  const a = lowerBound(lo), b = lowerBound(hi), out = [];
+  // The Pi decides what is an arrival and what a take-off (pi/publish.py);
+  // the page's own copy of the rule dropped 0.23% of the published points
+  // on 10-23 and could drift from the Pi's, so it is no longer applied.
+  const a = lowerBound(lo), b = lowerBound(hi), out = [], show = MOV_SHOW();
   for (let i = a; i < b; i++) {
-    if (!activeAP.has(PTS.ap[i]) || !activeCat.has(ACS[PTS.ac[i]][4])) continue;
-    const p = getPt(i);
-    if (isArrivalPt(p)) out.push(p);
+    if (!show[PTS.mov[i]] || !activeAP.has(PTS.ap[i]) || !activeCat.has(ACS[PTS.ac[i]][4])) continue;
+    out.push(getPt(i));
   }
   return out;
 }
@@ -1506,24 +1520,35 @@ async function loadData() {
   await showIndex(idx, true);
 }
 
-// The hour files in the cache, concatenated (sorted by name = by time) into
-// one set of columns, keeping only points inside META's window.
-function assemblePoints(names) {
-  names = [...names].sort();
+// The hour files in the cache, concatenated in time order into one set of
+// columns, keeping only points inside META's window. `names` are arrival
+// files (h/), `depNames` take-off files (o/); an hour's two files are merged
+// by the second, since the drawing finds a time window by binary search.
+// `mov` is 0 for an arrival point, 1 for a take-off.
+function assemblePoints(names, depNames) {
+  const byHour = {};                                   // "YYYYMMDD/HH.json" -> {a, d}
+  names.forEach(nm => { byHour[nm.slice(2)] = {a: chunkCache[nm]}; });
+  (depNames || []).forEach(nm => { const k = nm.slice(2); (byHour[k] = byHour[k] || {}).d = chunkCache[nm]; });
+  const keys = Object.keys(byHour).sort();
   let n = 0;
-  names.forEach(nm => { n += chunkCache[nm].cols.n; });
+  keys.forEach(k => { const e = byHour[k]; n += (e.a ? e.a.cols.n : 0) + (e.d ? e.d.cols.n : 0); });
   const all = {n: 0, lat: new Float32Array(n), lon: new Float32Array(n), alt: new Float32Array(n),
     tmin: new Float32Array(n), ap: new Uint8Array(n), ac: new Uint32Array(n),
-    gs: new Float32Array(n), track: new Float32Array(n), vrate: new Float32Array(n)};
-  names.forEach(nm => {
-    const {start, cols} = chunkCache[nm];
-    for (let i = 0; i < cols.n; i++) {
-      const epoch = start + cols.sec[i];
-      if (epoch < META.start || epoch > META.end) continue;
-      const k = all.n++;
-      all.lat[k] = cols.lat[i]; all.lon[k] = cols.lon[i]; all.alt[k] = cols.alt[i];
-      all.tmin[k] = (epoch - META.start) / 60; all.ap[k] = cols.ap[i]; all.ac[k] = cols.ac[i];
-      all.gs[k] = cols.gs[i]; all.track[k] = cols.track[i]; all.vrate[k] = cols.vrate[i];
+    gs: new Float32Array(n), track: new Float32Array(n), vrate: new Float32Array(n), mov: new Uint8Array(n)};
+  const put = (start, cols, i, mov) => {
+    const epoch = start + cols.sec[i];
+    if (epoch < META.start || epoch > META.end) return;
+    const k = all.n++;
+    all.lat[k] = cols.lat[i]; all.lon[k] = cols.lon[i]; all.alt[k] = cols.alt[i];
+    all.tmin[k] = (epoch - META.start) / 60; all.ap[k] = cols.ap[i]; all.ac[k] = cols.ac[i];
+    all.gs[k] = cols.gs[i]; all.track[k] = cols.track[i]; all.vrate[k] = cols.vrate[i]; all.mov[k] = mov;
+  };
+  keys.forEach(k => {
+    const A = byHour[k].a, D = byHour[k].d, na = A ? A.cols.n : 0, nd = D ? D.cols.n : 0;
+    let i = 0, j = 0;
+    while (i < na || j < nd) {
+      if (j >= nd || (i < na && A.cols.sec[i] <= D.cols.sec[j])) { put(A.start, A.cols, i, 0); i++; }
+      else { put(D.start, D.cols, j, 1); j++; }
     }
   });
   return all;
@@ -1534,8 +1559,12 @@ async function showIndex(idx, live) {
   // "now" needs only the last hour or two, and the map used to stay empty
   // until the slowest of 25 files (12.6 MB) had landed (10-24). A refresh of
   // the view already shown waits for all of them as before.
+  CUR_INDEX = idx;
   const progressive = (live ? 'live' : idx.meta.date) !== CUR_VIEW;
-  const order = [...idx.chunks].sort((a, b) => b.name.localeCompare(a.name));
+  // the take-off files only when they are to be shown: a map of arrivals downloads what it did before
+  const deps = MOV === 'a' ? [] : (idx.deps || []);
+  const order = [...idx.chunks, ...deps].sort((a, b) => b.name.slice(2).localeCompare(a.name.slice(2)));
+  const cached = list => list.filter(c => chunkCache[c.name]).map(c => c.name);
   let done = 0, lastPartial = 0;
   const partial = () => {
     if (!progressive || (live ? VIEW_DAY : VIEW_DAY !== idx.meta.date)) return;
@@ -1543,10 +1572,10 @@ async function showIndex(idx, live) {
     if (t - lastPartial < 400) return;         // at most a few redraws a second while files land
     lastPartial = t;
     META = idx.meta; WX = idx.wx || []; SPAN = META.span_min;
-    PTS = assemblePoints(idx.chunks.filter(c => chunkCache[c.name]).map(c => c.name));
+    PTS = assemblePoints(cached(idx.chunks), cached(deps));
     _curMin = SPAN;
     document.getElementById('timeline').max = SPAN;
-    document.getElementById('updated').textContent = `loading, ${done} of ${idx.chunks.length} hours…`;
+    document.getElementById('updated').textContent = `loading, ${done} of ${order.length} hours…`;
     redraw();
   };
   // Every hour file that can be had; one that fails (raw.githubusercontent
@@ -1561,14 +1590,14 @@ async function showIndex(idx, live) {
     partial();
   }));
   const missing = order.filter((c, i) => got[i].status === 'rejected' && !chunkCache[c.name]);   // got[] follows order[]
-  if (missing.length === idx.chunks.length && idx.chunks.length) {
+  if (missing.length === order.length && order.length) {
     const e = got.find(r => r.status === 'rejected').reason;
     document.getElementById('updated').textContent = META ? 'update failed, showing ' + shortTime(SPAN) : 'no data yet (' + e.message + ')';
     return;
   }
-  idx = Object.assign({}, idx, {chunks: idx.chunks.filter(c => chunkCache[c.name])});
+  idx = Object.assign({}, idx, {chunks: idx.chunks.filter(c => chunkCache[c.name]), deps: deps.filter(c => chunkCache[c.name])});
   if (live ? VIEW_DAY : VIEW_DAY !== idx.meta.date) return;   // the choice changed while loading
-  const current = new Set(idx.chunks.map(c => c.name));
+  const current = new Set([...idx.chunks, ...idx.deps].map(c => c.name));
   Object.keys(chunkCache).forEach(n => { if (!current.has(n)) delete chunkCache[n]; });
 
   const view = live ? 'live' : idx.meta.date, switched = view !== CUR_VIEW;
@@ -1577,7 +1606,7 @@ async function showIndex(idx, live) {
   const shift = META && !switched ? (META.start - idx.meta.start) / 60 : 0;
   META = idx.meta; WX = idx.wx || [];
   SPAN = META.span_min;
-  PTS = assemblePoints(idx.chunks.map(c => c.name));
+  PTS = assemblePoints(idx.chunks.map(c => c.name), idx.deps.map(c => c.name));
   _curMin = atEdge ? SPAN : Math.max(0, Math.min(SPAN, _curMin + shift));
   // a past day opens at its last recorded moment, not at an empty midnight
   if (!live && switched && PTS.n) _curMin = Math.min(SPAN, Math.ceil(PTS.tmin[PTS.n - 1]));
@@ -1593,13 +1622,15 @@ async function showIndex(idx, live) {
     const age = (Date.now() / 1000 - META.built) / 60;
     upd.textContent = 'updated ' + FMT_TIME.format(new Date(META.built * 1000)).replace(/^0/, '') +
       (age > STALE_MIN ? ' — ' + Math.round(age / 60 * 10) / 10 + ' h ago, the Pi may be offline' : '') +
-      (missing.length ? ` — ${missing.length} hour${missing.length > 1 ? 's' : ''} missing, retrying at the next refresh` : '');
+      (missing.length ? ` — ${missing.length} hour${missing.length > 1 ? 's' : ''} missing, retrying at the next refresh` : '') +
+      takeoffNote();
     upd.style.color = age > STALE_MIN || missing.length ? '#ff9f40' : '';
   } else {
     // a day can start late: the day the archive began, or the Pi was off
     upd.textContent = 'showing ' + FMT_DAYPICK.format(new Date(idx.meta.date + 'T12:00:00Z')) +
       (idx.meta.first_hour > META.start ? ', recorded from ' + FMT_TIME.format(new Date(idx.meta.first_hour * 1000)).replace(/^0/, '') : '') +
-      (missing.length ? ` — ${missing.length} hour${missing.length > 1 ? 's' : ''} could not be loaded` : '');
+      (missing.length ? ` — ${missing.length} hour${missing.length > 1 ? 's' : ''} could not be loaded` : '') +
+      takeoffNote();
     upd.style.color = missing.length ? '#ff9f40' : '';
   }
   drawFarm(idx.farm);
@@ -1641,11 +1672,20 @@ function drawFarm(f) {
   // here from the passes themselves (51 "aircraft" were 51 passes by 49, 10-24)
   const kept = (f.passes || []).filter(p => p.rule === 'parcel' && p.prop !== true && p.alt_agl != null);
   const nAc = new Set(kept.map(p => p.hex)).size || s.aircraft;
-  document.getElementById('farm-summary').innerHTML = s.aircraft
-    ? `<b>${s.aircraft}</b> pass${s.aircraft > 1 ? 'es' : ''} by <b>${nAc}</b> aircraft · median <b>${fmt(s.median_agl)}</b> · lowest <b>${fmt(s.lowest_agl)}</b> above the ground` +
+  // The headline is the forecast's measure (owner, 10-24: one rule for the map
+  // and the forecast): within 2 miles of the farm centre below 6,000 ft, props
+  // included, counted per hour as the forecast counts them (pi/publish.py
+  // near_summary). The land itself -- the parcel, props left out -- follows.
+  const near = f.near;
+  const head = near
+    ? `<b>${near.aircraft}</b> plane${near.aircraft === 1 ? '' : 's'} within ${near.radius_mi} mi below ${near.below_ft.toLocaleString()} ft` +
+      ` <span class="farm-why">(what the <a href="busy.html">forecast</a> counts; props included)</span><br>`
+    : '';
+  document.getElementById('farm-summary').innerHTML = head + (s.aircraft
+    ? `Over the land itself: <b>${s.aircraft}</b> pass${s.aircraft > 1 ? 'es' : ''} by <b>${nAc}</b> aircraft · median <b>${fmt(s.median_agl)}</b> · lowest <b>${fmt(s.lowest_agl)}</b> above the ground` +
       `<br>${s.under_highlight} under ${fmt(s.highlight_agl || LOW_HIGHLIGHT_AGL)}` +
       (s.props_excluded ? ` · ${s.props_excluded} prop plane${s.props_excluded > 1 ? 's' : ''} not counted` : '')
-    : 'No aircraft over the land yet' + (s.props_excluded ? ` (${s.props_excluded} prop planes not counted)` : '') + '.';
+    : 'No aircraft over the land itself yet' + (s.props_excluded ? ` (${s.props_excluded} prop planes not counted)` : '') + '.');
 }
 
 function eventItems(ev) {
