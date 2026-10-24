@@ -27,7 +27,10 @@ day picker for 30 days), `flights.html` (the same without the farm, built by
 `tools/make_public.py`), `heat.html` (history: near = 50 mi under 15,000 ft
 with wind/airport/take-off choices; Wide = 200 mi, every height, radio beacons), `busy.html` (landings and take-offs at Dulles per
 15 minutes, by day of the week; from 10-23; with a 7-day forecast of planes over
-the farm, left off as `busy.html?public` from `flights.html`).
+the farm, left off as `busy.html?public` from `flights.html`). Every page's header
+carries the same page buttons — Live map, History, Busy times — since 10-24 (his
+request: "have the same buttons on the live page show up on the other pages as
+well"; before, the history and busy pages only linked back to the live map).
 
 **Tests:** `python3 -m unittest discover -s tests -v` (73 tests, ~2 min;
 the page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`

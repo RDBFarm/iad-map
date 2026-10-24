@@ -167,6 +167,9 @@ class Pages(unittest.TestCase):
         pg, errors = self.open("heat.html")
         self.assertEqual(errors, [])
         self.assertIn("aircraft-hours", pg.inner_text("#status"))
+        # the same page buttons on every page (owner, 10-24)
+        self.assertEqual(pg.get_attribute("#btn-busy", "href"), "busy.html")
+        self.assertEqual(pg.get_attribute("#back", "href"), "live.html")
         lit = "(() => { let n = 0; for (let i = 0; i < SHOWN.s.length; i++) if (SHOWN.s[i] || SHOWN.b[i]) n++; return n; })()"
         self.assertGreater(pg.evaluate(lit), 0)
         pg.click("#btn-wide")
@@ -183,6 +186,8 @@ class Pages(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertIn("Counted by the farm's receiver", pg.inner_text("#status"))
         self.assertIn("0 whole days", pg.inner_text("#status"))   # the made-up log is three hours
+        self.assertEqual(pg.get_attribute("#btn-heat", "href"), "heat.html")   # the same page buttons on every page (10-24)
+        self.assertEqual(pg.get_attribute("#back", "href"), "live.html")
         self.assertIn("no whole days yet", pg.inner_text("#tbl"))
         self.assertIn("Needs a whole day", pg.inner_text("#fc-note"))
         pg.close()
