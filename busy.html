@@ -540,14 +540,15 @@ async function loadForecast() {
   FCDAYS = buildForecast(om.value);
   document.getElementById('fc-record').textContent = recordText(PI);
   const pct = x => Math.round(x * 100);
-  note.textContent = `Planes expected within ${MODEL.near_mi} miles of the farm, below ${MODEL.below_ft.toLocaleString()} ft. ` +
-    `When Dulles lands to the south, ${pct(MODEL.share.S)}% of its arrivals pass over; landing north, ${pct(MODEL.share.N)}%. ` +
-    `Which way it lands follows the wind (Open-Meteo forecast), though not always. ` +
-    `Higher up, about ${Math.round(MODEL.above_per_hour.S)} an hour pass whatever the wind.`;
+  // his wording, 10-24; the detail is under (i)
+  note.textContent = `Planes expected to fly within ${MODEL.near_mi} miles of the farm during final approach.`;
   const k = MODEL.check, hrs = MODEL.hours;
   document.getElementById('fc-about').textContent = `Counts planes passing within ${MODEL.near_mi} miles of the farm below ` +
     `${MODEL.below_ft.toLocaleString()} ft: Dulles's usual landings for that hour and weekday (from the counts below) times the ` +
-    `share that pass over the farm for the way it is likely to be landing. Measured ${fmtDay(MODEL.first)} – ${fmtDay(MODEL.last)} ` +
+    `share that pass over the farm for the way it is likely to be landing. When Dulles lands to the south, ` +
+    `${pct(MODEL.share.S)}% of its arrivals pass over the farm; landing north, ${pct(MODEL.share.N)}%. Which way it lands ` +
+    `follows the wind at Dulles (Open-Meteo forecast), though not always. Higher up, about ` +
+    `${Math.round(MODEL.above_per_hour.S)} an hour pass whatever the wind. Measured ${fmtDay(MODEL.first)} – ${fmtDay(MODEL.last)} ` +
     (MODEL.score ? '(kept up to date by the Pi)' : '(a snapshot)') + ': ' +
     `${hrs.south} hours landing south, ${hrs.north} north. Landing south was ${pct(MODEL.p_south[MODEL.p_south.length - 1].p)}% ` +
     `of hours with at least ${MODEL.p_south[MODEL.p_south.length - 1].from_kt} knots of wind from the south along the runways, ` +

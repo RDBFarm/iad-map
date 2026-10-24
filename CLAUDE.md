@@ -8,15 +8,19 @@ than assuming.
 
 ---
 
-## 0. Start here — status as of 2026-10-18
+## 0. Start here — status as of 2026-10-24
 
 **Running on the Pi** (systemd): `iad-map-collector` (logs every aircraft heard,
 every 2 s), `iad-map-alerts` (emergency squawks, low passes, sightings → GitHub
 issue + text message), `iad-map-publish.timer` (every 15 min → `live-data`:
-the live map, 30 days of hours, both history heat maps), `iad-map-aircraft-db.timer`
+the live map, 30 days of hours, both history heat maps, the busy-times counts
+`busy.json` and the farm forecast's numbers and record `farm-model.json`), `iad-map-aircraft-db.timer`
 (monthly type lookup), `iad-map-netcheck.timer` (every 5 min, from 10-22: name
 lookups, diagnosis, self-renewal; see "Lookup outage"). Each upload carries the installed version in
-`live.json` `meta.pi_version` (from 10-18; written by the installer).
+`live.json` `meta.pi_version` (from 10-18; written by the installer). **Installed 10-23: 7ceb6ab**
+(busy times and the farm forecast with scoring); by 9:16 PM it had counted 27 whole days for
+`busy.json` and 679 hours for `farm-model.json` (`"ready": true`, every hour with a wind) and kept
+its first forecast (10-23 evening).
 
 **Pages** (GitHub Pages, from `main`): `live.html` (75 miles, under 15,000 ft;
 day picker for 30 days), `flights.html` (the same without the farm, built by
@@ -41,9 +45,13 @@ test); repo 363 MB compressed with the 30-day window.
 never measured (he declined self-reporting health for now, 10-18); close-
 approach thresholds (first guesses; he only sees jets ones); runway headings in
 the classifier (magnetic vs true); live map panels overlap at phone width
-(weather card over the altitude legend). Reminders already scheduled in the
-owner's session: 11-19 (UA 2853 on 11-21: wind, seat, the light at the farm;
-re-check the middle runway), 2027-01-15 (777-9 deliveries: drop `B779`).
+(weather card over the altitude legend). **Farm forecast, new 10-23:** the first scores
+(`score.by_lead` in `farm-model.json`) should appear from 10-24; the page shows a line once
+a lead has 4 scored blocks. The rule's choices (2 mi, 6,000 ft, blocks) are mine, not yet confirmed.
+**Scheduled tasks** (each starts its own session; moved off the 10-14–10-24 session
+when it was archived): 10-25 10 AM (are the scores coming in), 11-19 (UA 2853 on
+11-21: wind, seat, the light at the farm; re-check the middle runway), 2027-01-15
+(777-9 deliveries: drop `B779`).
 
 ### How to change something on the Pi
 All Pi code is in `pi/` on `main`. Merge the change, then have him run on
@@ -269,7 +277,7 @@ See `README.md` for how to install. In short:
 
 ### Farm forecast (10-23, his request)
 - His words: "an air traffic forecast for the farm ... expected plane activity based on the expected winds, an hourly as well as blocks of time in the coming 7 days". He pointed at the weather rdbf-app already grabs: its forecasts are **Open-Meteo** (`docs/live-weather.js` there), so this uses Open-Meteo too, fetched by the page (Dulles, 10 m wind, knots, `timeformat=unixtime` so no time-zone parsing). Nothing on the Pi.
-- **My choices, unconfirmed:** "activity" = aircraft within **2 miles of the farm centre below 6,000 ft** (`farm.FARM`); blocks Night 12–6a, Morning 6a–12p, Afternoon 12–6p, Evening 6p–12a, Eastern. Block cells show only the number (10-23, his request: the "lands N / S or N" labels went; tapping an hour gives the wind and the chance of landing south).
+- **My choices, unconfirmed:** "activity" = aircraft within **2 miles of the farm centre below 6,000 ft** (`farm.FARM`); blocks Night 12–6a, Morning 6a–12p, Afternoon 12–6p, Evening 6p–12a, Eastern. The note under the heading is his wording (10-24): "Planes expected to fly within 2 miles of the farm during final approach." The shares and the wind go under (i). Block cells show only the number (10-23, his request: the "lands N / S or N" labels went; tapping an hour gives the wind and the chance of landing south).
 - **Measured** (`tools/make_farm_model.py` → `farm-model.json`; t/ files 09-25 – 10-23 and KIAD METARs from the Iowa Environmental Mesonet): Dulles landed south (arrivals' direction in the 2.5 min before they got below 1,500 ft; 80% of an hour's landings) in 162 hours and north in 442. **Landing south, 76% of its arrivals passed within 2 mi below 6,000 ft; landing north, 2%.** Higher up, 7.7 an hour either way, so not forecast. Landing south against wind along the runways (speed × cos(from − 181°), 181° = measured south landing direction): under 0 kt 4%, 0–2 kt 28% (calm included), 2–4 kt 72%, 4+ kt 100%. The flow stayed the same as the hour before in 555 of 568 hour pairs.
 - **The rule:** expected per hour = Dulles's average landings for that weekday and hour (last 28 whole days of `busy.json`) × (p·0.76 + (1−p)·0.02), p from the forecast wind. **Checked on the same weeks with the winds that blew** (in-sample, not forecasts; re-measured with the shared code, variable winds counted as calm): hourly correlation 0.81; 6-hour blocks 0.89; blocks it called quiet (<10) median 2, busy (≥40) median 109, but one "busy" block had 2: in light or variable wind the rule hedges (26% south) and a busy hour of Dulles landings then gives a middling number that is wrong either way. **But Dulles doesn't always follow the wind:** 10-11 3–5 PM it landed south into a 340° 8–9 kt wind and a "quiet" block had 118. Forecast error comes on top and wasn't measurable here (Open-Meteo is blocked from the cloud sandbox; the page was checked with NWS hourly winds standing in).
 - **Kept up to date by the Pi, and scored (10-23, his request: asked whether it would improve with more data, "yes, build both"):** `pi/farmcast.py`, run by `publish.py` after `busy.py`. Each settled hour is counted once (its `t/` file and neighbours): `[flow, landings, near, above]`, plus KIAD's wind `[deg or None, kt]` from publish's METARs, or from the IEM archive for hours they no longer cover (at most every 6 h); state `/mnt/flightdata/iad-map/farmcast/state.json`, which grows past the 30-day window. `farm-model.json` on `live-data` is `model()` of every hour so far, with `"ready": true` from 336 hours (two weeks); **the page uses the Pi's copy once ready, the repository's (`tools/make_farm_model.py`, same functions) until then**, and says how far the Pi has got. Variable winds count as calm (the first tool dropped them); `AXIS_DEG` = 181 is fixed (the tool prints what it measures).
