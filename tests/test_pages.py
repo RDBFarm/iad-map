@@ -223,7 +223,7 @@ class Pages(unittest.TestCase):
             pg, errors = self.open("busy.html", width=width, data=self.site_url + "no-such-branch/",
                                    fulfil={"api.open-meteo.com": om})
             self.assertEqual(errors, [], f"busy.html at {width}px")
-            self.assertEqual(pg.inner_text("#fc-note"), "Planes expected to fly within 2 miles of the farm during final approach for landing.")
+            self.assertEqual(pg.inner_text("#fc-note"), "Planes expected to fly within 2 miles of the farm during final approach.")
             rows = pg.query_selector_all("#fc-blocks tr")
             self.assertEqual(len(rows), 7)
             cell = lambda r, b: rows[r].query_selector_all("td")[b + 1].inner_text()
