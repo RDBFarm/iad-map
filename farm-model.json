@@ -1,0 +1,88 @@
+{
+ "version": 1,
+ "near_mi": 2.0,
+ "below_ft": 6000,
+ "axis_deg": 181,
+ "share": {
+  "S": 0.758,
+  "N": 0.022
+ },
+ "p_south": [
+  {
+   "from_kt": null,
+   "to_kt": 0,
+   "p": 0.04,
+   "hours": 349
+  },
+  {
+   "from_kt": 0,
+   "to_kt": 2,
+   "p": 0.23,
+   "hours": 159
+  },
+  {
+   "from_kt": 2,
+   "to_kt": 4,
+   "p": 0.74,
+   "hours": 35
+  },
+  {
+   "from_kt": 4,
+   "to_kt": null,
+   "p": 1.0,
+   "hours": 84
+  }
+ ],
+ "above_per_hour": {
+  "S": 7.7,
+  "N": 7.6
+ },
+ "hours": {
+  "counted": 699,
+  "south": 162,
+  "north": 465,
+  "mixed": 19,
+  "unclear": 53,
+  "with_wind": 699
+ },
+ "ready": true,
+ "first": "2026-09-25",
+ "last": "2026-10-24",
+ "check": {
+  "note": "the rule on the same weeks with the winds that blew, not forecasts",
+  "hourly_corr": 0.81,
+  "block_corr": 0.89,
+  "blocks": 115,
+  "quiet_blocks": {
+   "n": 63,
+   "median": 2,
+   "max": 118
+  },
+  "busy_blocks": {
+   "n": 20,
+   "median": 112.0,
+   "min": 2
+  }
+ },
+ "source": "pi/farmcast.py on the farm's receiver: its recorded paths and KIAD METARs",
+ "score": {
+  "days": 28,
+  "forecasts": 2,
+  "by_lead": [
+   {
+    "lead": 0,
+    "blocks": 2,
+    "median_err": 9.0,
+    "median_actual": 2.0,
+    "median_forecast": 11.0
+   },
+   {
+    "lead": 1,
+    "blocks": 2,
+    "median_err": 3.1,
+    "median_actual": 1.5,
+    "median_forecast": 4.6
+   }
+  ]
+ }
+}
