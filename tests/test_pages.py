@@ -223,7 +223,7 @@ class Pages(unittest.TestCase):
             pg, errors = self.open("busy.html", width=width, data=self.site_url + "no-such-branch/",
                                    fulfil={"api.open-meteo.com": om})
             self.assertEqual(errors, [], f"busy.html at {width}px")
-            self.assertIn("within 2 miles of the farm", pg.inner_text("#fc-note"))
+            self.assertEqual(pg.inner_text("#fc-note"), "Planes expected to fly within 2 miles of the farm during final approach for landing.")
             rows = pg.query_selector_all("#fc-blocks tr")
             self.assertEqual(len(rows), 7)
             cell = lambda r, b: rows[r].query_selector_all("td")[b + 1].inner_text()
@@ -261,7 +261,7 @@ class Pages(unittest.TestCase):
         pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/",
                                fulfil={"farm-model.json?t=": json.dumps(pi), "api.open-meteo.com": om})
         self.assertEqual(errors, [])
-        self.assertIn("50% of its arrivals", pg.inner_text("#fc-note"))
+        self.assertIn("50% of its arrivals", pg.evaluate("document.getElementById('fc-about').textContent"))
         self.assertEqual(pg.inner_text("#fc-record"), "How it has done (last 28 days): 6-hour blocks forecast later the "
                          "same day were off by a median of 4 planes; the next day 6.5. A typical block had 15.")
         pg.close()
@@ -271,7 +271,7 @@ class Pages(unittest.TestCase):
         pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/",
                                fulfil={"farm-model.json?t=": mine, "api.open-meteo.com": om})
         self.assertEqual(errors, [])
-        self.assertIn(f"{round(seed['share']['S'] * 100)}% of its arrivals", pg.inner_text("#fc-note"))
+        self.assertIn(f"{round(seed['share']['S'] * 100)}% of its arrivals", pg.evaluate("document.getElementById('fc-about').textContent"))
         self.assertIn("The Pi is counting its own numbers (3 of 336 hours so far)", pg.inner_text("#fc-record"))
         pg.close()
 
