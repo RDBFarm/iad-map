@@ -59,6 +59,48 @@ class Publish(unittest.TestCase):
         self.assertIsNone(P.installed_version())       # no VERSION file in the repo
         self.assertIn("positions", self.index["meta"])
 
+    def test_take_offs_have_their_own_hour_files(self):
+        # o/ holds the airborne positions the arrival rules drop (owner, 10-24:
+        # a toggle on the live map); the fixture's DAL departures climb out of Dulles
+        deps = sorted(n for n in self.files if n.startswith("o/"))
+        self.assertEqual(len(deps), F.HOURS)
+        self.assertEqual([c["name"] for c in self.index["deps"]], deps)
+        self.assertEqual(set(deps), {n for n in self.final if n.startswith("o/")}, "settled like the h/ files")
+        in_files = lambda prefix, kind: any(prefix.encode() in self.files[n] for n in self.files if n.startswith(kind + "/"))
+        self.assertTrue(in_files("a20000", "o"), "a departure's climb is in the take-off files")
+        self.assertFalse(in_files("a10000", "o"), "an arrival is not")
+        self.assertTrue(in_files("a10000", "h"))
+        self.assertFalse(in_files("a60000", "o"), "nor the ground vehicle")
+        self.assertGreater(self.index["meta"]["takeoff_positions"], 0)
+
+    def test_the_over_the_farm_figure_is_the_forecasts_rule(self):
+        # one rule for the map and the forecast (owner, 10-24): within farmcast.NEAR_MI
+        # below farmcast.BELOW_FT per hour file; the Cessna crosses the farm at 1,100 ft
+        import farmcast as C
+        hours = [P.tracks.parse_name(n)[1] for n in self.files if n.startswith("t/")]
+        near = P.near_summary(hours, lambda h: P.read_track_body(P.tracks.hour_name("t", h), self.files))
+        self.assertEqual(near["hours"], F.HOURS)
+        self.assertEqual((near["radius_mi"], near["below_ft"], near["props"]), (C.NEAR_MI, C.BELOW_FT, "included"))
+        direct = sum(sum(1 for d, alt in C.closest(json.loads(self.files[n])).values() if d <= C.NEAR_MI and alt < C.BELOW_FT)
+                     for n in self.files if n.startswith("t/"))
+        self.assertEqual(near["aircraft"], direct)
+        self.assertGreaterEqual(near["aircraft"], F.HOURS, "the Cessna, every hour")
+        # farmcast's own count for an hour is used when it has one
+        rec = {hours[0]: ["S", 3, 7, 1]}
+        self.assertEqual(P.near_summary(hours, lambda h: P.read_track_body(P.tracks.hour_name("t", h), self.files), rec)["aircraft"],
+                         direct - sum(1 for d, alt in C.closest(json.loads(self.files[P.tracks.hour_name("t", hours[0])])).values()
+                                      if d <= C.NEAR_MI and alt < C.BELOW_FT) + 7)
+        # a finished day's file carries the figure and its take-off files
+        P.write_files(self.files)
+        real = P.fetch_weather
+        try:
+            P.fetch_weather = lambda start, hours=None, on_fail=[]: []
+            day = json.loads(P.day_file(P.local_day(F.T0), list(self.files), F.T0 + 86400, set(self.final), need_wx=False))
+        finally:
+            P.fetch_weather = real
+        self.assertEqual(day["farm"]["near"]["aircraft"], direct)
+        self.assertEqual(len(day["deps"]), F.HOURS)
+
     def test_a_jet_on_final_tracks_true_degrees_and_is_dulles(self):
         # 8 statute miles out at 2,500 ft tracking 181° true, what Dulles's
         # southbound landings measure. The runway table held the runway

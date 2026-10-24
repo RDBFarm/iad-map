@@ -573,7 +573,7 @@ def day_file(date, names, now, final_names, need_wx=True):
     at all because it was built during the name-lookup outage. The caller
     tries again on later runs and gives up after WX_RETRY_DAYS."""
     start, end = day_bounds(date)
-    chunks, trk, positions, aircraft, first = [], [], 0, set(), None
+    chunks, trk, deps, positions, aircraft, first = [], [], [], 0, set(), None
     for n in sorted(names):
         kind, hour = tracks.parse_name(n)
         if not (start <= hour < end):
@@ -587,8 +587,10 @@ def day_file(date, names, now, final_names, need_wx=True):
             positions += len(body["pts"])
             aircraft.update(a[0] for a in body["ac"])
             first = hour if first is None else min(first, hour)
-        else:
+        elif kind == "t":
             trk.append(entry)
+        else:
+            deps.append(entry)
     ev = {k: [e for e in proximity.recent(EVENTS_DIR, k + ".jsonl", start)
               if start <= e.get("t", e.get("cpa_t", 0)) < end]
           for k in ("emergencies", "close_approaches", "tcas")}
@@ -610,11 +612,52 @@ def day_file(date, names, now, final_names, need_wx=True):
                  "ground_ft": farm.ground_ft(*farm.FARM)[0], "ground_basis": farm.ground_ft(*farm.FARM)[1],
                  "passes": passes},
         "chunks": chunks,
+        "deps": deps,
         "tracks": trk,
     }
     index["farm"]["summary"] = farm.summary(passes)
+    index["farm"]["near"] = near_summary([tracks.parse_name(e["name"])[1] for e in trk],
+                                         lambda h: read_track_body(tracks.hour_name("t", h)))
     enrich(index)
     return json.dumps(index, separators=(",", ":")).encode()
+
+
+def read_track_body(name, files=None):
+    """A t/ hour file parsed, from this run's bytes or from disk; None if neither."""
+    body = (files or {}).get(name)
+    try:
+        if body is None:
+            with open(os.path.join(WORK_DIR, name), "rb") as f:
+                body = f.read()
+        return json.loads(body)
+    except (OSError, ValueError):
+        return None
+
+
+def near_summary(hours, load, records=None):
+    """The over-the-farm figure the forecast predicts (owner, 10-24: one rule
+    for the map and the forecast): aircraft within farmcast.NEAR_MI of the
+    farm centre below farmcast.BELOW_FT at their closest point, props
+    included, counted once per hour file as farmcast counts them (so an
+    aircraft crossing an hour boundary counts in both hours, as it does in
+    the forecast's own record). `records` are farmcast's per-hour records
+    for hours it has already counted; the rest come from load(hour)."""
+    total, counted = 0, 0
+    for h in sorted(set(hours)):
+        rec = (records or {}).get(h)
+        if rec is not None:
+            total += rec[2]
+        else:
+            body = load(h)
+            if body is None:
+                continue
+            total += sum(1 for d, alt in farmcast.closest(body).values()
+                         if d <= farmcast.NEAR_MI and alt is not None and alt < farmcast.BELOW_FT)
+        counted += 1
+    return {"aircraft": total, "hours": counted, "radius_mi": farmcast.NEAR_MI, "below_ft": farmcast.BELOW_FT,
+            "props": "included", "rule": "the forecast's: within %g miles of the farm centre below %d ft, "
+                                          "at the closest point of each aircraft's recorded path, per hour"
+                                          % (farmcast.NEAR_MI, farmcast.BELOW_FT)}
 
 
 def build(now, wx=None, final=frozenset()):
@@ -628,25 +671,39 @@ def build(now, wx=None, final=frozenset()):
     departures = departure_points(logged)
     # Same filters as render_github.py: drop departure climbs, then anything
     # is_arrival() rejects (ground vehicles, taxiing, fast climb-outs).
-    raw = [r for r in logged
-           if (r[1], r[0]) not in departures
-           and is_arrival(r[4], r[5] or 0, r[7] or 0, r[6] or 0, r[2], r[3], r[11], r[8])]
-    by_hour = {}
-    for r in raw:
-        by_hour.setdefault(r[0] - r[0] % 3600, []).append(r)
-    files, chunks, now_final = {}, [], set()
-    for hour_start in sorted(by_hour):
-        name = tracks.hour_name("h", hour_start)
-        if name in final:
-            with open(os.path.join(WORK_DIR, name), "rb") as f:
-                body = f.read()
-        else:
-            body = json.dumps(hour_chunk(by_hour[hour_start], hour_start),
-                              separators=(",", ":")).encode()
-        if hour_start + 3600 + SETTLE_S <= end:
-            now_final.add(name)
-        files[name] = body
-        chunks.append({"name": name, "hash": hashlib.sha1(body).hexdigest()[:12]})
+    # Take-offs (owner, 10-24: a toggle on the live map like the heat map's)
+    # are the airborne positions those rules drop -- the heat map's 'd' --
+    # in their own hour files, o/<day>/<HH>.json, so a map showing arrivals
+    # only downloads what it did before. Hours frozen before the files
+    # existed have none; the page says from when it has them.
+    raw, dep = [], []
+    for r in logged:
+        if (r[1], r[0]) not in departures and is_arrival(r[4], r[5] or 0, r[7] or 0, r[6] or 0, r[2], r[3], r[11], r[8]):
+            raw.append(r)
+        elif r[4] > 0 and r[11] not in GROUND_VEHICLE_CATEGORIES:
+            dep.append(r)
+    files, now_final = {}, set()
+
+    def hour_files(kind, rows):
+        by_hour = {}
+        for r in rows:
+            by_hour.setdefault(r[0] - r[0] % 3600, []).append(r)
+        out = []
+        for hour_start in sorted(by_hour):
+            name = tracks.hour_name(kind, hour_start)
+            if name in final:
+                with open(os.path.join(WORK_DIR, name), "rb") as f:
+                    body = f.read()
+            else:
+                body = json.dumps(hour_chunk(by_hour[hour_start], hour_start),
+                                  separators=(",", ":")).encode()
+            if hour_start + 3600 + SETTLE_S <= end:
+                now_final.add(name)
+            files[name] = body
+            out.append({"name": name, "hash": hashlib.sha1(body).hexdigest()[:12]})
+        return out
+    chunks = hour_files("h", raw)
+    dep_chunks = hour_files("o", dep)
     # Whole recorded tracks, every altitude and range, for drawing a selected
     # flight's full path (tracks.py). Failure here never stops the map.
     track_chunks = []
@@ -669,6 +726,7 @@ def build(now, wx=None, final=frozenset()):
             "start": start, "end": end, "built": end,
             "span_min": SPAN_S // 60,
             "positions": len(window), "aircraft": len({r[1] for r in window}),
+            "takeoff_positions": sum(1 for r in dep if r[0] >= start),
             "positions_in_area": len(heard),
             "departure_points_dropped": sum(1 for r in heard if (r[1], r[0]) in departures),
             "mlat_positions": sum(1 for r in heard if r[10]),
@@ -692,6 +750,7 @@ def build(now, wx=None, final=frozenset()):
             "passes": proximity.recent(EVENTS_DIR, "farm_passes.jsonl", start),
         },
         "chunks": chunks,
+        "deps": dep_chunks,
         "tracks": track_chunks,
     }
     return index, files, now_final & set(files)
@@ -743,7 +802,7 @@ def write_files(files):
 
 def write_tree(index, files):
     """Everything in `files` on disk, everything else under h/ t/ d/ gone."""
-    for sub in ("h", "t", "d"):
+    for sub in ("h", "t", "o", "d"):
         top = os.path.join(WORK_DIR, sub)
         os.makedirs(top, exist_ok=True)
         for dirpath, dirnames, filenames in os.walk(top, topdown=False):
@@ -964,14 +1023,29 @@ def update_busy(final, now):
         print("publish: busy times failed:", e, flush=True)
 
 
-def update_farm_forecast(final, now, wx):
+def update_farm_forecast(index, files, final, now, wx):
     """The farm forecast's numbers and the record of its kept forecasts (farmcast.py),
-    after busy.json, which it reads. Never stops the map."""
+    after busy.json, which it reads; then the live map's over-the-farm figure
+    under the same rule (`farm.near` in live.json: farmcast's counts for the
+    hours it has, this run's t/ files for the rest). Never stops the map."""
+    state_dir = os.path.join(os.path.dirname(DB_PATH), "farmcast")
     try:
-        if farmcast.update(WORK_DIR, now, os.path.join(os.path.dirname(DB_PATH), "farmcast"), final, wx):
+        if farmcast.update(WORK_DIR, now, state_dir, final, wx):
             print("publish: farm forecast numbers updated", flush=True)
     except Exception as e:
         print("publish: farm forecast failed:", e, flush=True)
+    try:
+        try:
+            with open(os.path.join(state_dir, "state.json")) as f:
+                records = {int(h): r for h, r in json.load(f).get("hours", {}).items()}
+        except (OSError, ValueError):
+            records = {}
+        start = index["meta"]["start"]
+        hours = [p[1] for p in map(tracks.parse_name, index.get("tracks", []) and [c["name"] for c in index["tracks"]])
+                 if p and p[1] + 3600 > start]
+        index["farm"]["near"] = near_summary(hours, lambda h: read_track_body(tracks.hour_name("t", h), files), records)
+    except Exception as e:
+        print("publish: over-the-farm figure failed:", e, flush=True)
 
 
 def enrich(index):
@@ -1017,7 +1091,7 @@ def main():
     update_heat(index, final, index["meta"]["end"], wx)
     update_wide_heat(index, index["meta"]["end"])
     update_busy(final, index["meta"]["end"])
-    update_farm_forecast(final, index["meta"]["end"], wx)
+    update_farm_forecast(index, files, final, index["meta"]["end"], wx)
     m = index["meta"]
     print(f"publish: {m['positions']} positions, {m['aircraft']} aircraft, "
           f"{m['mlat_positions']} MLAT positions, {m['aircraft_mlat_only']} aircraft seen only by MLAT, "

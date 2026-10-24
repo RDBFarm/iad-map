@@ -200,7 +200,7 @@ class Pages(unittest.TestCase):
             self.assertLessEqual(pg.evaluate("document.documentElement.scrollWidth"), width)
             # tapping a bar, then a time on Wednesday's row, gives its figures under both charts
             bw = pg.evaluate("document.getElementById('bars').clientWidth")
-            pg.click("#bars", position={"x": 30 + 64.5 * (bw - 34) / 96, "y": 100})
+            pg.click("#bars", position={"x": 64 + 64.5 * (bw - 68) / 96, "y": 100})   # the grid's gutter (10-24)
             self.assertIn("Every day, 4:00\u20134:15 PM:", pg.inner_text("#bar-tip"))
             self.assertIn("landings on average", pg.inner_text("#bar-tip"))
             gw = pg.evaluate("document.getElementById('grid').clientWidth")
@@ -236,7 +236,7 @@ class Pages(unittest.TestCase):
             rows[2].click()
             self.assertIn("planes", pg.inner_text("#fc-day-title"))
             fw = pg.evaluate("document.getElementById('fc-bars').clientWidth")
-            pg.click("#fc-bars", position={"x": 30 + 15.5 * (fw - 34) / 24, "y": 80})
+            pg.click("#fc-bars", position={"x": 64 + 15.5 * (fw - 68) / 24, "y": 80})
             self.assertRegex(pg.inner_text("#fc-bar-tip"), r"3p\u20134p: about \d+ planes \u00b7 wind from the S at 10 kt")
             self.assertEqual(pg.inner_text("#fc-record"), "", "no numbers from the Pi here")
             # the page's arithmetic and the Pi's twin (farmcast.predict), which scores its kept forecasts
@@ -377,6 +377,43 @@ class Pages(unittest.TestCase):
         if partial:
             self.assertRegex(chip, r"^from \d+[ap]$")
         self.assertEqual(pg.get_attribute("[data-kind=a]", "aria-pressed"), "true")
+        self.assertEqual(errors, [])
+        pg.close()
+
+    def test_take_offs_toggle_like_the_heat_map(self):
+        # Arrivals (the map as before) / Take-offs (the o/ files) / Both (owner, 10-24)
+        pg, errors = self.open("live.html")
+        # [points loaded, of them take-offs, points the map shows over the whole day]
+        count = "(() => { let n = 0; for (let i = 0; i < PTS.n; i++) n += PTS.mov[i]; return [PTS.n, n, getPtsInRange(0, SPAN + 1).length]; })()"
+        arrivals, movA, shownA = pg.evaluate(count)
+        self.assertEqual(movA, 0, "arrivals only: nothing marked as a take-off, and no o/ file fetched")
+        self.assertEqual(shownA, arrivals)
+        self.assertEqual(pg.get_attribute("#mov-row .btn >> nth=0", "aria-pressed"), "true")
+        pg.click("#mov-row .btn >> nth=1")                 # Take-offs
+        pg.wait_for_timeout(2500)
+        loaded, deps, shownD = pg.evaluate(count)
+        self.assertGreater(deps, 0)
+        self.assertEqual(loaded, arrivals + deps, "the arrivals stay loaded; the take-off files join them")
+        self.assertEqual(shownD, deps, "but only the take-offs are shown")
+        self.assertNotIn("take-offs", pg.inner_text("#updated"), "the fixture has take-off files for every hour")
+        pg.click("#mov-row .btn >> nth=2")                 # Both
+        pg.wait_for_timeout(2500)
+        both, movB, shownB = pg.evaluate(count)
+        self.assertEqual((both, movB, shownB), (arrivals + deps, deps, arrivals + deps))
+        # the points stay in time order, which the drawing's binary search relies on
+        self.assertTrue(pg.evaluate("(() => { for (let i = 1; i < PTS.n; i++) if (PTS.tmin[i] < PTS.tmin[i - 1]) return false; return true; })()"))
+        self.assertEqual(pg.evaluate("localStorage.getItem('iadmap.mov')"), "ad")
+        self.assertEqual(errors, [])
+        pg.close()
+
+    def test_farm_headline_is_the_forecasts_measure(self):
+        pg, errors = self.open("live.html")
+        text = pg.evaluate("""() => { drawFarm({center: FARM_CENTER || [39.15, -77.46], passes: [],
+            summary: {aircraft: 0, props_excluded: 0, rule: 'parcel'},
+            near: {aircraft: 12, hours: 24, radius_mi: 2.0, below_ft: 6000, props: 'included'}});
+            return document.getElementById('farm-summary').innerText; }""")
+        self.assertIn("12 planes within 2 mi below 6,000 ft", text)
+        self.assertIn("No aircraft over the land itself yet", text)
         self.assertEqual(errors, [])
         pg.close()
 

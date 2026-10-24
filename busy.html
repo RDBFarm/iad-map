@@ -248,7 +248,9 @@ function drawAxis(ctx, left, cw, y) {
 function drawBars() {
   const s = STATS[SEL], cv = document.getElementById('bars');
   const {ctx, w, h} = setupCanvas(cv, 190);
-  const left = 30, bottom = h - 18, top = 8, cw = (w - left - 4) / 96;
+  // the same gutter as the grid above, so an hour sits under the same hour
+  // (the bars began 34 px further left: "12am slightly left of 12am", owner, 10-24)
+  const left = GRID.left, bottom = h - 18, top = 8, cw = (w - left - 4) / 96;
   const max = Math.max(...STATS[SEL].v, 1), nice = Math.ceil(max / 5) * 5;
   ctx.fillStyle = 'rgba(253,231,37,0.18)';
   ctx.fillRect(left + s.hourStart * cw, top, cw * 4, bottom - top);
@@ -315,7 +317,7 @@ function gridAt(e) {
   const cw = (document.getElementById('grid').clientWidth - GRID.left - 4) / 96;
   return {r: Math.floor((e.offsetY - GRID.top) / GRID.rowH), q: Math.floor((e.offsetX - GRID.left) / cw)};
 }
-const barAt = e => Math.floor((e.offsetX - 30) / ((document.getElementById('bars').clientWidth - 34) / 96));
+const barAt = e => Math.floor((e.offsetX - GRID.left) / ((document.getElementById('bars').clientWidth - GRID.left - 4) / 96));
 const grid = document.getElementById('grid'), bars = document.getElementById('bars');
 grid.addEventListener('click', e => {
   const {r, q} = gridAt(e);
@@ -459,7 +461,7 @@ function drawFcGrid() {
 function drawFcBars() {
   const d = FCDAYS[FCSEL], cv = document.getElementById('fc-bars');
   const {ctx, w, h} = setupCanvas(cv, 210);
-  const left = 30, top = 8, bottom = h - 48, cw = (w - left - 4) / 24;
+  const left = FCG.left, top = 8, bottom = h - 48, cw = (w - left - 4) / 24;   // under the grid's hours
   const max = Math.max(...d.hours.filter(Boolean).map(x => x.exp), 1), nice = Math.ceil(max / 5) * 5;
   ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.fillStyle = '#99a'; ctx.font = '10px -apple-system, sans-serif';
   ctx.textBaseline = 'middle';
@@ -500,7 +502,7 @@ const fcGrid = document.getElementById('fc-grid'), fcBars = document.getElementB
 if (fcGrid) {
   const at = e => { const cw = (fcGrid.clientWidth - FCG.left - 4) / 24;
     return {r: Math.floor((e.offsetY - FCG.top) / FCG.rowH), hh: Math.floor((e.offsetX - FCG.left) / cw)}; };
-  const barHour = e => Math.floor((e.offsetX - 30) / ((fcBars.clientWidth - 34) / 24));
+  const barHour = e => Math.floor((e.offsetX - FCG.left) / ((fcBars.clientWidth - FCG.left - 4) / 24));
   fcGrid.addEventListener('click', e => {
     const {r, hh} = at(e);
     if (FCDAYS && r >= 0 && r < FCDAYS.length) { FCSEL = r; if (hh >= 0 && hh < 24) FCPICK = hh; drawForecast(); }

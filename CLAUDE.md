@@ -29,7 +29,7 @@ with wind/airport/take-off choices; Wide = 200 mi, every height, radio beacons),
 15 minutes, by day of the week; from 10-23; with a 7-day forecast of planes over
 the farm, left off as `busy.html?public` from `flights.html`).
 
-**Tests:** `python3 -m unittest discover -s tests -v` (69 tests, ~2 min;
+**Tests:** `python3 -m unittest discover -s tests -v` (73 tests, ~2 min;
 the page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`
 and `LEAFLET_DIST=<leaflet dist folder>` when there is no network). They run on
 every PR and push (`.github/workflows/tests.yml`). `tests/fixture.py` is a
@@ -152,13 +152,35 @@ sandbox's Chromium on the real 10-23 files (860,722 points, 25 hour files,
 - Not done (medium each, noted by the review): `pi/notable.json` (1.87 MB
   raw, 193 KB gzipped) is still fetched up front; `paint()` still goes
   through a base64 data URL.
-**Waiting on his decision (not changed):** (#2) 69% of KIAD take-offs keep
-their climb on the live map (1,545 of 2,227; 4.7% of points): 39% are first
-heard above 500 ft so the climb rule never starts, and GA-flagged points (60%
-of all) skip the filter — a toggle like the heat map's, or a stricter rule;
-(#3) the live map's "over the farm" (parcel crossings, props out, ~40–50/day)
-and the forecast's rule (2 mi under 6,000 ft, props in: 6–25/day north flow,
-312 on south-flow 10-16) are different quantities under the same words.
+**His decisions, 10-24 ~4 AM ("Include 2 and 3"), built in the fourth PR
+(Pi side: needs the installer):**
+- **(#2) Take-offs on the live map: a toggle, the heat map's words**
+  (Arrivals / Take-offs / Both, top of the ✈ panel, remembered per browser).
+  Take-offs are the airborne positions the arrival rules drop — the heat
+  map's definition — in their own hour files `o/<day>/<HH>.json`
+  (`live.json` `deps`, `d/` files too), so a map of arrivals downloads what
+  it did before; the files are fetched when Take-offs or Both is chosen.
+  Hours frozen before the install have none; the header says "take-offs from
+  <time>" (or that none are recorded for a past day). The page's own copy of
+  the arrival rule (`isArrivalPt`) is gone: the Pi decides. **Still true:**
+  69% of KIAD take-offs keep their climb in the *arrival* files (1,545 of
+  2,227; 4.7% of points): 39% are first heard above 500 ft so the climb rule
+  never starts, and GA-flagged points (60% of all) skip the filter. The
+  toggle shows the split as the rules make it; it does not fix the rule.
+  A better rule can be judged against the busy rule's take-offs (the review's
+  method, `q2_arr_dep.py`); not attempted.
+- **(#3) One farm rule, the forecast's:** the live map's headline is now
+  "N planes within 2 mi below 6,000 ft (what the forecast counts; props
+  included)" — `farm.near` in `live.json` and the `d/` files
+  (`publish.near_summary`: farmcast's per-hour records where it has them,
+  this run's `t/` files for the rest; counted per hour file as the forecast
+  counts, so an aircraft crossing an hour boundary counts in both, ≤1.3%).
+  The parcel figure stays underneath as "Over the land itself: N passes by M
+  aircraft …" (his 09-24 rule: the land, props left out, the low-pass
+  highlights and alerts). The forecast page's wording was already his.
+- Also his, same hour: on `busy.html` the bars began 34 px left of the grid
+  above them ("12am slightly left of 12am"); both bar charts now use the
+  grid's gutter (`GRID.left` / `FCG.left`), so an hour sits under the same hour.
 Also measured: the busy rule reproduces `busy.json` exactly and balances
 (2,178 landings / 2,227 take-offs over 5 days); its error is reception —
 5.8% of landings and 8.0% of take-offs vanish or appear at 1,500–5,000 ft and
@@ -318,7 +340,7 @@ receiver: 291 aircraft (271 with position), ~1,683 messages/sec.
 See `README.md` for how to install. In short:
 
 - **`pi/collector.py`** — logs to SQLite at **`/mnt/flightdata/iad-map/flights.db`**. One row per aircraft per read, for every aircraft with a new message: all ranges and altitudes, with or without position. Buffers and commits every 30 s, and saves the buffer when systemd stops it (from 10-24; before, up to 30 s of readings died with every restart). **Refuses to start if `/mnt/flightdata` isn't mounted.** Deletes nothing until the drive is nearly full (Retention, below).
-- **`pi/publish.py`** — every 15 min (systemd timer): last 24 h, within **75** statute mi of KIAD (50 until 10-18: his "Yes, widen to 75 miles", after it measured ~21% more traffic below 15,000 ft; hours already frozen keep 50; the history heat map stays at 50 via `HEAT_RADIUS_NM`), ≤15,000 ft → one JSON file per UTC hour plus `live.json` on the **`live-data`** branch, as a single commit replaced and force-pushed, plus `live-data-prev` (same files, with the previous push as parent). Each push sends only the current hour and the index.
+- **`pi/publish.py`** — every 15 min (systemd timer): last 24 h, within **75** statute mi of KIAD (50 until 10-18: his "Yes, widen to 75 miles", after it measured ~21% more traffic below 15,000 ft; hours already frozen keep 50; the history heat map stays at 50 via `HEAT_RADIUS_NM`), ≤15,000 ft → one JSON file per UTC hour plus `live.json` on the **`live-data`** branch, as a single commit replaced and force-pushed, plus `live-data-prev` (same files, with the previous push as parent). Each push sends only the current hour and the index. From 10-24 the airborne positions the arrival rules drop go into a second file per hour, `o/<day>/<HH>.json` (take-offs, for the map's toggle; `live.json` `deps`), built and frozen like the `h/` files.
   - **Fixed 09-26: every push was sending the whole tree (~18 MiB, ~1.8–2.1 GiB/day measured with vnstat on the Pi).** Two causes. (1) Git skips files the remote has only when the remote's commit is a *parent* of the pushed one; an amended single commit has none, so git sent all ~57 MiB of files every run (reproduced locally: one changed file, 19.6 MiB sent). `live-data-prev` supplies the parent link. (2) Finished hour files were rebuilt each run and some changed: e.g. an aircraft last heard low that reappears hours later climbing makes the departure rule drop points from the old hour (shown in a test). Now an hour file is built once, `SETTLE_S` (10 min) after the hour ends, and read back from disk after that; the list of final files is kept in `publish/.git/iad-map-final-hours`. Same for `t/`. On a simulated day the pushes went from ~2,300 KiB each to 17–130 KiB. **Verified on the Pi 09-26** (installed 12:4x EDT, `vnstat -5 -i eth0`): push blocks went from 20.8–22.1 MiB tx to 4.9–5.1 MiB, about 0.4–0.5 MiB above the neighbouring quiet blocks (4.5–4.7 MiB), including the first run after install. Pushes with a **deploy key** scoped to this repo only.
 - **Classification** — `classify_airport()`, `is_arrival()` and the climb-sequence departure rule copied from `render_github.py`. The departure rule runs on each aircraft's points thinned to ≥10 s (the spacing it was written for); the map itself is never thinned. **Decided 09-26: a rise counts toward a climb only when the thinned points are ≤60 s apart** (`CLIMB_MAX_GAP_S`; suggested by the Pi/network session, his call). Before it, an aircraft last heard low and heard again hours later higher up read as one climb, and its earlier arrival points were dropped. Frozen hours keep the old rule; only hours built after the installer run use it. Fixed 09-24: GA flag requires an N-number, not any N-callsign (Spirit, NKS, was caught); two-letter airline hints removed.
 - **`live.html`** — fetches the hour files from raw.githubusercontent.com (Pages is not rebuilt), refetches only changed hours every 5 min. Points held in typed-array columns. Dots **viridis by altitude**, brightest at the ground; neutral labelled airport markers.
@@ -351,6 +373,7 @@ See `README.md` for how to install. In short:
 
 ### Over the farm (built and installed 09-24)
 - His request (09-24): an over-the-farm figure on the live map, highlight passes **under 2,000 ft**, push to phone **under 1,500 ft**, and **exclude prop planes**.
+- **From 10-24 the headline figure is the forecast's measure** (his decision, §0 review: one rule for the map and the forecast): aircraft within 2 mi of the farm centre below 6,000 ft, props included (`farm.near` in `live.json`). The parcel rule below still drives the passes, the low-pass highlights and the alerts, and is shown underneath as "Over the land itself".
 - `pi/farm.py`: within **1 nm** of the parcel centre (39.1506, -77.4612), any altitude, airborne; one log line per pass with its closest point. Altitudes are reported pressure altitude, not height above the farm.
 - "Prop plane" = my reading, not confirmed by him: fixed-wing (L/S/A/G) with piston, turboprop or electric engines per ICAO Doc 8643 descriptors (`pi/aircraft_types.json`, from tar1090-db). Helicopters and jets stay in. **Unknown types: logged and shown on the map, never pushed** (his call, 09-24). Types come from `aircraft_lookup.py`, since readsb supplies none.
 - From the May 1, 2025 cache (≤15,000 ft only): 228 aircraft within 1 nm of the parcel that day, median 3,800 ft, lowest 1,150 ft; 112 at 3,000–3,999 ft, 103 of them southbound and descending/level, noon–7 PM with a southerly wind — consistent with the approach to Dulles's southbound runways (an inference). One day only; north-flow days will differ.
