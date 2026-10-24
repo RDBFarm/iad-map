@@ -122,7 +122,7 @@ days of `t/` files, 10-16 and 10-18 – 10-22); every number below was measured.
   `recordText` no longer throws when no shown lead has 4 blocks.
   `heat.html`: a missing image says "no image published for this choice
   yet" instead of the browser's decode error.
-**Third PR (speed, merged 10-24; nothing on the Pi).** Measured in the
+**Third PR (#90, speed, merged 10-24; nothing on the Pi).** Measured in the
 sandbox's Chromium on the real 10-23 files (860,722 points, 25 hour files,
 12.6 MB gzipped), before → after; an iPad is slower by a factor not measured:
 - **First open draws as the hour files arrive, newest first** (`showIndex`
