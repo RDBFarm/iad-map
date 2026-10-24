@@ -26,7 +26,10 @@
     background:rgba(64,180,255,0.12); border:1px solid rgba(64,180,255,0.3);
     color:#40b4ff; padding:2px 10px; border-radius:20px; font-size:0.7rem; white-space:nowrap;
   }
-  #map { position:absolute; top:50px; bottom:130px; left:0; right:0; }
+  /* --hdr is the header's measured height (set below): when its subtitle wraps —
+     the "Pi may be offline" note at 1280 px, two lines on a phone — the panels
+     under it used to sit 25 px inside it (10-24) */
+  #map { position:absolute; top:var(--hdr, 50px); bottom:130px; left:0; right:0; }
   @supports (height: 100dvh) {
     #map { bottom: 130px; }
   }
@@ -89,6 +92,7 @@
          background:linear-gradient(to right,navy,blue,cyan,lime,yellow,red);
          margin:3px 0 4px; }
   .gl { display:flex; justify-content:space-between; color:#667; }
+  .leg-note { margin-top:6px; line-height:1.7; color:#556; font-size:0.7rem; }   /* 11 px: the floor on this page */
   #wx {
     position:absolute; bottom:162px; right:14px; z-index:1000;
     background:rgba(10,10,20,0.88); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
@@ -97,20 +101,20 @@
   }
   #wx h3 { font-size:0.78rem; color:#dde; margin-bottom:10px;
             display:flex; align-items:center; gap:6px; }
-  #wx h3 span { font-size:0.65rem; color:#7788aa; font-weight:normal; }
+  #wx h3 span { font-size:0.7rem; color:#7788aa; font-weight:normal; }
   .wx-row {
     display:flex; align-items:center; gap:8px;
     padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05); line-height:1.4;
   }
   .wx-row:last-child { border-bottom:none; }
   .wx-icon { font-size:1rem; min-width:22px; text-align:center; }
-  .wx-label { color:#8899bb; font-size:0.68rem; }
+  .wx-label { color:#8899bb; font-size:0.7rem; }
   .wx-val { color:#eef; font-weight:600; }
   #wind-arrow { display:inline-block; font-size:1.1rem; transition:transform 0.5s ease; }
 
   /* airport toggle panel */
   #ap-panel {
-    position:absolute; top:58px; right:14px; z-index:1000;
+    position:absolute; top:calc(var(--hdr, 50px) + 8px); right:14px; z-index:1000;
     background:rgba(10,10,20,0.88); -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
     border:1px solid rgba(255,255,255,0.08); border-radius:10px;
     padding:10px 14px; font-size:0.72rem; color:#ccd; min-width:175px;
@@ -118,7 +122,7 @@
   #ap-panel h3 { font-size:0.75rem; color:#dde; margin-bottom:8px; }
   #ap-more { margin-top:6px; border-top:1px solid rgba(255,255,255,0.08); padding-top:6px; }
   #ap-more summary { cursor:pointer; color:#aab; margin-bottom:4px; }
-  .cat-count { font-size:0.62rem; color:#889; }
+  .cat-count { font-size:0.7rem; color:#889; }
   #cat-off { color:#ff9f40; font-weight:normal; }
   .cat-caret { display:none; }
   /* phone: the panel folds to a button so it doesn't sit under the search box */
@@ -143,17 +147,19 @@
   .ap-toggle.off { opacity:0.35; }
   .ap-name { flex:1; }
   .ap-badge {
-    font-size:0.62rem; color:#667; background:rgba(255,255,255,0.06);
+    font-size:0.7rem; color:#667; background:rgba(255,255,255,0.06);
     padding:1px 5px; border-radius:8px;
   }
   .divider { border-top:1px solid rgba(255,255,255,0.07); margin:6px 0; }
 
   /* search panel */
   #search-panel {
-    position:absolute; top:58px; left:50px; z-index:1001;
+    position:absolute; top:calc(var(--hdr, 50px) + 8px); left:50px; z-index:1001;
     background:rgba(10,10,20,0.92); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
     border:1px solid rgba(255,255,255,0.08); border-radius:10px;
     padding:10px 14px; font-size:0.72rem; color:#ccd; width:230px;
+    /* with many results and events it reached the legend (230 x 64 px over it at 1280 x 800, 10-24) */
+    max-height:calc(100% - var(--hdr, 50px) - 280px); overflow-y:auto;
   }
   #search-panel h3 { font-size:0.75rem; color:#dde; margin-bottom:8px; }
   #search-input {
@@ -174,8 +180,10 @@
   .search-result:hover { background:rgba(64,180,255,0.1); }
   .search-result.active { background:rgba(64,180,255,0.2); }
   .sr-flight { color:#40b4ff; font-weight:600; font-size:0.73rem; }
-  .sr-type  { color:#7788aa; font-size:0.68rem; }
-  .sr-time  { color:#aab; font-size:0.68rem; white-space:nowrap; }
+  .sr-type  { color:#7788aa; font-size:0.7rem; }
+  .sr-time  { color:#aab; font-size:0.7rem; white-space:nowrap; }
+  .sr-name  { color:#7788aa; font-size:0.7rem; flex-basis:100%; }   /* the type's name, was hover-only (10-24) */
+  .search-result { flex-wrap:wrap; }
   #search-clear {
     position:absolute; right:20px; top:50%; transform:translateY(-50%);
     color:#556; cursor:pointer; font-size:0.9rem; display:none;
@@ -185,10 +193,10 @@
   #search-bar.on { display:flex; }
   #search-clear-btn { padding:2px 8px; font-size:0.68rem; }
   #events h3 { margin-top:10px; }
-  #events-note { color:#7788aa; font-size:0.65rem; margin-top:3px; }
+  #events-note { color:#7788aa; font-size:0.7rem; margin-top:3px; }
   /* event markers: shape and text carry the meaning, not colour */
   .ev-icon div { background:#fff; color:#111; border:1.5px solid #111; border-radius:4px;
-    padding:1px 5px; font-size:0.66rem; font-weight:700; white-space:nowrap;
+    padding:1px 5px; font-size:0.7rem; font-weight:700; white-space:nowrap;
     box-shadow:0 0 0 1.5px rgba(255,255,255,0.8); }
   .ev-icon.ev-emergency div { border-width:2.5px; font-size:0.72rem; }
   .ev-icon.ev-low div { border-style:dashed; }
@@ -212,10 +220,40 @@
     #btn-row { flex-wrap:wrap; gap:6px 8px; }
     #btn-row .btn { padding:4px 9px; }
     #btn-row .ctrl-lbl { margin-left:0 !important; }
+    /* the panels above the control bar (10-24): it is 168 px tall here, and the
+       legend, weather card and event card sat at the desktop's 138/162 px, 30 px
+       inside it, with the legend and weather card 114 px over each other
+       (210 + 160 px minimum widths + margins = 398 > 390). Side by side, half
+       the width each, and clear of the bar. tests/test_pages.py measures it. */
+    #leg, #wx { bottom:184px; }
+    #leg { left:10px; width:calc(50% - 15px); min-width:0; padding:8px 10px; }
+    #wx { right:10px; width:calc(50% - 15px); min-width:0; padding:8px 10px; }
+    /* the open categories panel ran 24 px over the search box */
+    body:has(#ap-panel.open) #search-panel { width:calc(100% - 205px); }
+    /* a long search list ran down over the weather card and legend: it scrolls instead */
+    #search-panel { max-height:calc(100% - var(--hdr, 50px) - 430px); overflow-y:auto; }
+    /* taps: 40 px high (Apple's 44 would cost another row of the map) */
+    #hdr { padding:8px 10px; }
+    #hdr .btn, #btn-row .btn { min-height:40px; display:inline-flex; align-items:center; }
+    #controls { height:176px; }
+    #map { bottom:176px; }
+    .ap-toggle, .search-result, #ap-panel h3, #ap-more summary { min-height:40px; }
+    #ap-panel h3, #ap-more summary { display:flex; align-items:center; }
+    #timeline::-webkit-slider-thumb, .ctrl-slider::-webkit-slider-thumb { width:22px; height:22px; }
+    #day-pick { min-height:40px; }
   }
+  /* day map: the panels go light and their text dark. toggleMapStyle() recolours
+     the elements it knows; this covers the ones it did not (the panel headings,
+     search rows and legend text vanished on the light panels, 10-24). */
+  body.day #search-panel, body.day #ap-panel, body.day #leg, body.day #events-list { color:#223; }
+  body.day #search-panel h3, body.day #leg h3, body.day #ap-panel h3 { color:#223; }
+  body.day .sr-time, body.day .sr-type, body.day .sr-name, body.day #events-note, body.day #search-count,
+  body.day .cat-count, body.day #ap-more summary, body.day .ctrl-lbl, body.day .leg-note, body.day .gl { color:#445566; }
+  body.day .sr-flight, body.day .btn { color:#1565a8; }
+  body.day #search-input::placeholder { color:#667; }
   html, body { overflow-x:hidden; }
   /* near-the-farm search */
-  #near-panel { position:absolute; top:58px; right:14px; z-index:1003; width:min(360px, calc(100% - 28px));
+  #near-panel { position:absolute; top:calc(var(--hdr, 50px) + 8px); right:14px; z-index:1003; width:min(360px, calc(100% - 28px));
     max-height:calc(100% - 200px); overflow-y:auto; background:rgba(10,10,20,0.96);
     border:1px solid rgba(255,255,255,0.15); border-radius:10px; padding:12px 14px; font-size:0.74rem;
     color:#dde; line-height:1.45; }
@@ -248,7 +286,11 @@
   #ev-card .note { color:#99a; margin-top:6px; }
   #ev-close { position:absolute; top:8px; right:10px; background:none; border:none; color:#aab;
     font-size:1.1rem; cursor:pointer; padding:2px 6px; }
-  #search-count { font-size:0.65rem; color:#556; margin-top:4px; }
+  /* phone: clear of the 176 px control bar (after the rules above, which would win otherwise) */
+  @media (max-width:600px) {
+    #ev-card { left:10px; bottom:184px; width:calc(100% - 20px); max-height:calc(100% - 250px); }
+  }
+  #search-count { font-size:0.7rem; color:#556; margin-top:4px; }
 
   /* click popup */
   #dot-popup {
@@ -265,7 +307,7 @@
   #dot-popup .pop-lbl { color:#7788aa; }
   #dot-popup .pop-val { color:#eef; font-weight:600; }
   .leaflet-tooltip.ap-label { background:rgba(255,255,255,0.85); color:#111; border:none;
-    box-shadow:none; padding:0 4px; font-size:0.65rem; font-weight:600; }
+    box-shadow:none; padding:0 4px; font-size:0.7rem; font-weight:600; }
   .leaflet-tooltip.ap-label::before { display:none; }
 </style>
 </head>
@@ -292,7 +334,7 @@
   <h3>Altitude</h3>
   <div class="gb" id="alt-ramp"></div>
   <div class="gl"><span>Ground</span><span>7,500 ft</span><span>15,000 ft</span></div>
-  <div style="margin-top:6px;line-height:1.7;color:#556;font-size:0.67rem">
+  <div class="leg-note">
     Viridis: brightest = lowest<br>Brighter = more aircraft · thicker = bigger plane
   </div>
 </div>
@@ -593,8 +635,9 @@ function doSearch(query) {
     div.className = 'search-result' + (r.key === selectedResultKey ? ' active' : '');
     div.innerHTML = `<span><span class="sr-flight">${esc(r.flight)}</span>
       <span class="sr-type"> · ${esc(r.rawType || '?')}</span></span>
-      <span class="sr-time">${edtToDisplay(r.time)}</span>`;
-    div.title = (TYPE_NAMES[r.rawType] || r.rawType || 'type unknown') + ' · address ' + r.hex.toUpperCase() +
+      <span class="sr-time">${edtToDisplay(r.time)}</span>
+      <span class="sr-name">${esc(TYPE_NAMES[r.rawType] || (r.rawType ? '' : 'type unknown'))}</span>`;
+    div.title = 'address ' + r.hex.toUpperCase() +
       (r.labels.length > 1 ? ' · also heard without its callsign' : '');
     div.onclick = () => selectResult(div, r);
     el.appendChild(div);
@@ -862,6 +905,7 @@ let tileLayer = L.tileLayer(TILE_DARK, {attribution:TILE_ATTR, subdomains:'abcd'
 
 function toggleMapStyle() {
   isDark = !isDark;
+  document.body.classList.toggle('day', !isDark);   // the CSS recolours what the lines below don't
   map.removeLayer(tileLayer);
   tileLayer = L.tileLayer(isDark ? TILE_DARK : TILE_LIGHT,
     {attribution:TILE_ATTR, subdomains:'abcd', maxZoom:14}).addTo(map);
@@ -1207,6 +1251,14 @@ function period(m) {
 function updateWeather(edtMin) {
   if (!WX.length) return;
   // edtMin is already EDT minutes
+  if (edtMin < WX[0].t) {
+    // before the first report of the window: say so rather than show a
+    // report from the future (the card read "@ 09:52 PM" at 9:30 PM, 10-24)
+    document.getElementById('wx-time').textContent = 'first report ' + FMT_TIME.format(minToDate(WX[0].t));
+    for (const id of ['wx-temp', 'wx-wind', 'wx-vsby', 'wx-sky']) document.getElementById(id).textContent = '—';
+    document.getElementById('wx-wxrow').style.display = 'none';
+    return;
+  }
   let best = WX[0];
   for (const obs of WX) { if (obs.t <= edtMin) best = obs; }
   document.getElementById('wx-time').textContent = '@ ' + FMT_TIME.format(minToDate(best.t));
@@ -1436,16 +1488,22 @@ async function loadData() {
 }
 
 async function showIndex(idx, live) {
-  try {
-    await Promise.all(idx.chunks.map(async c => {
-      if (chunkCache[c.name] && chunkCache[c.name].hash === c.hash) return;
-      const {hash, data: body} = await fetchChecked(c);
-      chunkCache[c.name] = {hash, start: body.start, cols: chunkColumns(body)};
-    }));
-  } catch (e) {
+  // Every hour file that can be had; one that fails (raw.githubusercontent
+  // can serve a new live.json minutes before a brand-new hour file) no
+  // longer fails the whole load: the map draws the rest and says so, and
+  // the next refresh tries again (10-24).
+  const got = await Promise.allSettled(idx.chunks.map(async c => {
+    if (chunkCache[c.name] && chunkCache[c.name].hash === c.hash) return;
+    const {hash, data: body} = await fetchChecked(c);
+    chunkCache[c.name] = {hash, start: body.start, cols: chunkColumns(body)};
+  }));
+  const missing = idx.chunks.filter((c, i) => got[i].status === 'rejected' && !chunkCache[c.name]);
+  if (missing.length === idx.chunks.length && idx.chunks.length) {
+    const e = got.find(r => r.status === 'rejected').reason;
     document.getElementById('updated').textContent = META ? 'update failed, showing ' + shortTime(SPAN) : 'no data yet (' + e.message + ')';
     return;
   }
+  idx = Object.assign({}, idx, {chunks: idx.chunks.filter(c => chunkCache[c.name])});
   if (live ? VIEW_DAY : VIEW_DAY !== idx.meta.date) return;   // the choice changed while loading
   const current = new Set(idx.chunks.map(c => c.name));
   Object.keys(chunkCache).forEach(n => { if (!current.has(n)) delete chunkCache[n]; });
@@ -1490,13 +1548,15 @@ async function showIndex(idx, live) {
   if (live) {
     const age = (Date.now() / 1000 - META.built) / 60;
     upd.textContent = 'updated ' + FMT_TIME.format(new Date(META.built * 1000)).replace(/^0/, '') +
-      (age > STALE_MIN ? ' — ' + Math.round(age / 60 * 10) / 10 + ' h ago, the Pi may be offline' : '');
-    upd.style.color = age > STALE_MIN ? '#ff9f40' : '';
+      (age > STALE_MIN ? ' — ' + Math.round(age / 60 * 10) / 10 + ' h ago, the Pi may be offline' : '') +
+      (missing.length ? ` — ${missing.length} hour${missing.length > 1 ? 's' : ''} missing, retrying at the next refresh` : '');
+    upd.style.color = age > STALE_MIN || missing.length ? '#ff9f40' : '';
   } else {
     // a day can start late: the day the archive began, or the Pi was off
     upd.textContent = 'showing ' + FMT_DAYPICK.format(new Date(idx.meta.date + 'T12:00:00Z')) +
-      (idx.meta.first_hour > META.start ? ', recorded from ' + FMT_TIME.format(new Date(idx.meta.first_hour * 1000)).replace(/^0/, '') : '');
-    upd.style.color = '';
+      (idx.meta.first_hour > META.start ? ', recorded from ' + FMT_TIME.format(new Date(idx.meta.first_hour * 1000)).replace(/^0/, '') : '') +
+      (missing.length ? ` — ${missing.length} hour${missing.length > 1 ? 's' : ''} could not be loaded` : '');
+    upd.style.color = missing.length ? '#ff9f40' : '';
   }
   drawFarm(idx.farm);
   TRACK_LIST = idx.tracks || [];
@@ -1507,6 +1567,16 @@ async function showIndex(idx, live) {
   if (searchText) doSearch(searchText); else redraw();
 }
 drawLegend();
+// the panels and the map start where the header ends, however tall it is (see --hdr in the CSS)
+(() => {
+  const hdr = document.getElementById('hdr');
+  const set = () => {
+    document.documentElement.style.setProperty('--hdr', hdr.offsetHeight + 'px');
+    if (typeof map !== 'undefined') map.invalidateSize();
+  };
+  set();
+  if (window.ResizeObserver) new ResizeObserver(set).observe(hdr);
+})();
 // ── Events: emergencies, TCAS advisories, close approaches ─────────────────
 // From the Pi (alerts.py, proximity.py), at any range. Close approaches
 // flagged as airport traffic, formation or low-level are listed as a count
@@ -1523,8 +1593,12 @@ function drawFarm(f) {
   // heights are above the farm's ground (pi/farm.py).
   const s = f.summary || {};
   const fmt = n => Math.round(n).toLocaleString() + ' ft';
+  // summary.aircraft counts passes (farm.summary); the aircraft are counted
+  // here from the passes themselves (51 "aircraft" were 51 passes by 49, 10-24)
+  const kept = (f.passes || []).filter(p => p.rule === 'parcel' && p.prop !== true && p.alt_agl != null);
+  const nAc = new Set(kept.map(p => p.hex)).size || s.aircraft;
   document.getElementById('farm-summary').innerHTML = s.aircraft
-    ? `<b>${s.aircraft}</b> aircraft crossed it · median <b>${fmt(s.median_agl)}</b> · lowest <b>${fmt(s.lowest_agl)}</b> above the ground` +
+    ? `<b>${s.aircraft}</b> pass${s.aircraft > 1 ? 'es' : ''} by <b>${nAc}</b> aircraft · median <b>${fmt(s.median_agl)}</b> · lowest <b>${fmt(s.lowest_agl)}</b> above the ground` +
       `<br>${s.under_highlight} under ${fmt(s.highlight_agl || LOW_HIGHLIGHT_AGL)}` +
       (s.props_excluded ? ` · ${s.props_excluded} prop plane${s.props_excluded > 1 ? 's' : ''} not counted` : '')
     : 'No aircraft over the land yet' + (s.props_excluded ? ` (${s.props_excluded} prop planes not counted)` : '') + '.';

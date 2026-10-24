@@ -29,7 +29,7 @@ with wind/airport/take-off choices; Wide = 200 mi, every height, radio beacons),
 15 minutes, by day of the week; from 10-23; with a 7-day forecast of planes over
 the farm, left off as `busy.html?public` from `flights.html`).
 
-**Tests:** `python3 -m unittest discover -s tests -v` (62 tests, ~75 s;
+**Tests:** `python3 -m unittest discover -s tests -v` (68 tests, ~2 min;
 the page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`
 and `LEAFLET_DIST=<leaflet dist folder>` when there is no network). They run on
 every PR and push (`.github/workflows/tests.yml`). `tests/fixture.py` is a
@@ -43,8 +43,7 @@ test); repo 363 MB compressed with the 30-day window.
 
 **Still open:** drive growth per day and publisher memory on the real Pi were
 never measured (he declined self-reporting health for now, 10-18); close-
-approach thresholds (first guesses; he only sees jets ones); live map panels overlap at phone width
-(weather card over the altitude legend; fix in the second 10-24 review PR). **Farm forecast, new 10-23:** the first scores
+approach thresholds (first guesses; he only sees jets ones). **Farm forecast, new 10-23:** the first scores
 (`score.by_lead` in `farm-model.json`) should appear from 10-24; the page shows a line once
 a lead has 4 scored blocks. The rule's choices (2 mi, 6,000 ft, blocks) are mine, not yet confirmed.
 **Scheduled tasks** (each starts its own session; moved off the 10-14–10-24 session
@@ -55,7 +54,7 @@ when it was archived): 10-25 10 AM (are the scores coming in), 11-19 (UA 2853 on
 ### Review of 10-23/24 (speed, accuracy, usability) — what it found and what changed
 Three parallel reviews (the Pi programs, the pages, the rules run over 6 real
 days of `t/` files, 10-16 and 10-18 – 10-22); every number below was measured.
-**First PR (Pi side, merged 10-24, needs the installer run):**
+**First PR (#88, Pi side, merged 10-24 ~3:15 AM EDT; needs the installer run):**
 - **Runway headings were a typo, not magnetic vs true:** `AIRPORT_RUNWAYS`
   held runway *numbers* read as degrees (KIAD "01/19" as 19/199). True
   headings are 1°/181° (OurAirports; real finals measure 180.8° / 0.7°). The
@@ -92,6 +91,37 @@ days of `t/` files, 10-16 and 10-18 – 10-22); every number below was measured.
   (1.04 M in-area points, ~660–760 MB RSS on a synthetic log of that size,
   sandbox) — the floor on a 2 GB Pi; querying only unfrozen hours is a
   medium–large change, not done.
+**Second PR (pages, merged 10-24; nothing on the Pi):**
+- **Phone layout, measured at 390 × 844:** the ≤600 px block grew the control
+  bar to 168 px but left the legend, weather card and event card at the
+  desktop's `bottom:138/162px` — 30 px inside the bar, and the legend and
+  weather card 114 × 87 px over each other (210 + 160 px minimum widths plus
+  margins = 398 > 390). Now side by side at half width, `bottom:184px`, the
+  bar 176 px (buttons 40 px high). The panels under the header start at its
+  *measured* height (`--hdr`, a ResizeObserver): when the subtitle wraps —
+  the "Pi may be offline" note at 1280 px — they sat 25 px inside it. A long
+  search list scrolls instead of reaching the legend. `test_panels_stay_clear_of_each_other`
+  measures every pair at both widths, with results, with a card, with a wrapped header.
+- **Day map:** `toggleMapStyle()` recoloured the elements it listed; the panel
+  headings ("Flight Search", "Events"), search rows and legend text stayed
+  light on the light panels. `body.day` + CSS covers them now (`test_day_map_text_is_readable`).
+- Taps 40 px high on a phone (header and bar buttons, category and airport
+  rows, search rows; Apple's 44 would cost another row of the map); text
+  floor 0.7 rem (11 px) — six classes were 9.9–10.9 px.
+- **One missing hour file no longer fails the whole first load** (`Promise.allSettled`):
+  the map draws the rest and says "N hours missing, retrying at the next
+  refresh". raw.githubusercontent can serve a new `live.json` before a
+  brand-new hour file.
+- Weather card before the first report of the window says "first report
+  9:52 PM" instead of showing it (it read "@ 09:52 PM" at 9:30 PM). Search
+  rows show the type's name (was hover-only). "N passes by M aircraft" on the
+  farm summary (`summary.aircraft` counts passes; 51 on 10-18 were 49
+  aircraft). `busy.html`: midnight read "12:00 PM" (`quarter(96)`); a block
+  already part over says "from 9p" on the chip, not only on hover; the
+  pressed button carries a ✓ and `aria-pressed`, not only a tint;
+  `recordText` no longer throws when no shown lead has 4 blocks.
+  `heat.html`: a missing image says "no image published for this choice
+  yet" instead of the browser's decode error.
 **Waiting on his decision (not changed):** (#2) 69% of KIAD take-offs keep
 their climb on the live map (1,545 of 2,227; 4.7% of points): 39% are first
 heard above 500 ft so the climb rule never starts, and GA-flagged points (60%
@@ -287,7 +317,7 @@ See `README.md` for how to install. In short:
 - **Emergencies (7500/7600/7700) push to his phone** — his choice (09-24): text or GitHub; just him; everything the receiver hears. Built as `pi/alerts.py` → alert file on the `alerts` branch (deploy key) → `.github/workflows/emergency-alert.yml` opens an issue as github-actions[bot] mentioning @RDBFarm. Not with his own token: GitHub doesn't notify you about your own actions. Needs 3 consecutive reads (~6 s). Medical/min-fuel statuses logged only. Test with `alerts.py --test` after install; he needs the GitHub app with notifications on.
 - **Near misses: a log plus map highlights, no push** (his choice, 09-24). `pi/proximity.py`: under 500 ft vertically and closer than **10 s at their relative speed**, kept between 0.15 and 1.0 nm (his request, 09-24: "a slow near miss has a much smaller radius than a fast one"); both airborne; flags near_airport / low / persistent / mlat / tcas. Thresholds are first guesses — tune after real traffic. The first live event (09-24, two AVL-callsign light aircraft passing 0.85 nm apart at ~200 kt relative, 21 nm WNW of the farm) prompted the speed scaling; under it that pass is not logged. Relative speed, not range rate: range rate is zero at every closest point. Call them close approaches, never near misses, unless a TCAS advisory confirms.
 - **This readsb does report TCAS advisories (`acas_ra`)** — confirmed 09-24: 6 logged that day from 4 aircraft, all well above 15,000 ft (the first real one: VXP1191, a 737-700, "Level Off" at 30,400 ft descending towards UAL2748 level at 29,000 ft, 3:55:07 PM ET, ~38 nm SSW of the farm; "Clear of Conflict" 61 s later; closest ~4 nm and ~1,800 ft). Each RA is broadcast twice: the advisory and then "Clear of Conflict". **Not shown on the map since 09-25** (his call: "It was never a concern if it happened 4nm from each other"); still logged in `events/tcas.jsonl`, and a close approach flagged `tcas` is still shown.
-- At phone width the live map's panels overlap (inherited layout, worse with the Events list). Not fixed.
+- At phone width the live map's panels overlapped (inherited layout, worse with the Events list) until 10-24 (§0, review: second PR).
 
 ### Over the farm (built and installed 09-24)
 - His request (09-24): an over-the-farm figure on the live map, highlight passes **under 2,000 ft**, push to phone **under 1,500 ft**, and **exclude prop planes**.
