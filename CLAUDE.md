@@ -29,7 +29,7 @@ with wind/airport/take-off choices; Wide = 200 mi, every height, radio beacons),
 15 minutes, by day of the week; from 10-23; with a 7-day forecast of planes over
 the farm, left off as `busy.html?public` from `flights.html`).
 
-**Tests:** `python3 -m unittest discover -s tests -v` (68 tests, ~2 min;
+**Tests:** `python3 -m unittest discover -s tests -v` (69 tests, ~2 min;
 the page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`
 and `LEAFLET_DIST=<leaflet dist folder>` when there is no network). They run on
 every PR and push (`.github/workflows/tests.yml`). `tests/fixture.py` is a
@@ -91,7 +91,7 @@ days of `t/` files, 10-16 and 10-18 – 10-22); every number below was measured.
   (1.04 M in-area points, ~660–760 MB RSS on a synthetic log of that size,
   sandbox) — the floor on a 2 GB Pi; querying only unfrozen hours is a
   medium–large change, not done.
-**Second PR (pages, merged 10-24; nothing on the Pi):**
+**Second PR (#89, pages, merged 10-24 ~3:30 AM EDT; nothing on the Pi):**
 - **Phone layout, measured at 390 × 844:** the ≤600 px block grew the control
   bar to 168 px but left the legend, weather card and event card at the
   desktop's `bottom:138/162px` — 30 px inside the bar, and the legend and
@@ -122,6 +122,36 @@ days of `t/` files, 10-16 and 10-18 – 10-22); every number below was measured.
   `recordText` no longer throws when no shown lead has 4 blocks.
   `heat.html`: a missing image says "no image published for this choice
   yet" instead of the browser's decode error.
+**Third PR (#90, speed, merged 10-24; nothing on the Pi).** Measured in the
+sandbox's Chromium on the real 10-23 files (860,722 points, 25 hour files,
+12.6 MB gzipped), before → after; an iPad is slower by a factor not measured:
+- **First open draws as the hour files arrive, newest first** (`showIndex`
+  progressive path, `assemblePoints`): the map stayed empty until the slowest
+  of 25 files had landed. Local server: first points at 2,062 → 492–836 ms;
+  **over a throttled 4 Mbit/s link, 90.3 s → 13.9 s** (all files still take
+  90 s; "loading, N of 25 hours…" meanwhile). A refresh of the view already
+  shown waits for all files as before.
+- **A tapped flight fetches the track files its own points span ± 1 h**,
+  widening while the airborne path reaches a file's edge (`trackFilesFor`):
+  25 files (9.7 MB) were fetched to draw one path. Now 3 for a single visit;
+  an airframe heard in stretches across the day (UAL2677's, 19 h on the map)
+  still needs 20, and that is its path. A card that names an address draws
+  that aircraft only (UAL1017 was two airframes that day; both were drawn).
+  Parked-on-the-ground points do not widen the fetch.
+- **Search** 87–110 → 18–42 ms a keystroke (`searchResults` marked matches
+  per aircraft in a Uint8Array instead of building a 7-element array per
+  point; the input is debounced 120 ms, so typing "Bonanza" runs it once, not
+  seven times). **Redraw** at the 30-minute window 195 → 141–155 ms (a
+  256-entry altitude→colour table instead of `altColor()` per point; the
+  search match per aircraft, not per point; the visible count taken from
+  `draw()` instead of selecting the points a second time); 8-minute window
+  27 → 18–21 ms.
+- `heat.html`: the contrast slider repaints once the thumb has rested 80 ms
+  (`paint()` is ~310–380 ms: 2.1 M cells and a PNG re-encode, and it fired
+  per pixel moved; the paint itself is unchanged).
+- Not done (medium each, noted by the review): `pi/notable.json` (1.87 MB
+  raw, 193 KB gzipped) is still fetched up front; `paint()` still goes
+  through a base64 data URL.
 **Waiting on his decision (not changed):** (#2) 69% of KIAD take-offs keep
 their climb on the live map (1,545 of 2,227; 4.7% of points): 39% are first
 heard above 500 ft so the climb rule never starts, and GA-flagged points (60%

@@ -364,7 +364,10 @@ function drawRamps(g) {
     el.innerHTML = ramp('All traffic', viridis, SHOWN.max);
   }
 }
-document.getElementById('gamma').addEventListener('input', paint);
+// paint() fills 2.1 M cells and re-encodes the image (~380 ms); the slider fires per pixel moved,
+// so it repaints once the thumb has rested 80 ms (10-24)
+let paintTimer = null;
+document.getElementById('gamma').addEventListener('input', () => { clearTimeout(paintTimer); paintTimer = setTimeout(paint, 80); });
 document.getElementById('c-size').onclick = () => setColour('size');
 document.getElementById('c-single').onclick = () => setColour('single');
 function setColour(c) {

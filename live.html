@@ -500,7 +500,7 @@ function getPt(i) {
   const a = ACS[PTS.ac[i]], nz = v => Number.isNaN(v) ? null : v;
   const alt = PTS.alt[i];
   return [PTS.lat[i], PTS.lon[i], Math.max(0, Math.min(1, 1 - alt / 15000)), PTS.tmin[i],
-          PTS.ap[i], a[0], a[1], nz(PTS.gs[i]), alt, nz(PTS.track[i]), nz(PTS.vrate[i]), a[2], a[3]];
+          PTS.ap[i], a[0], a[1], nz(PTS.gs[i]), alt, nz(PTS.track[i]), nz(PTS.vrate[i]), a[2], a[3], PTS.ac[i]];
 }
 let WX = [];
 let META = null;
@@ -671,10 +671,14 @@ function doSearch(query) {
 // under its address, so on 10-20 two Lufthansa A340s showed as six "flights";
 // such a stretch joins the same aircraft's nearest flight within 3 hours.
 function searchResults() {
+  // which aircraft match, once each: this built a 7-element array per POINT
+  // (860k allocations, ~60 ms of each keystroke's ~100 ms, 10-24)
+  const hit = new Uint8Array(ACS.length);
+  ACS.forEach((a, k) => { hit[k] = matchesSearch([0,0,0,0,0, a[0], a[1]]) ? 1 : 0; });
   const first = new Map();                  // ACS index -> PTS index of its first point
   for (let i = 0; PTS && i < PTS.n; i++) {
     const k = PTS.ac[i];
-    if (!first.has(k) && matchesSearch([0,0,0,0,0, ACS[k][0], ACS[k][1]])) first.set(k, i);
+    if (hit[k] && !first.has(k)) first.set(k, i);
   }
   const rows = [], loose = [];
   first.forEach((i, k) => {
@@ -905,8 +909,11 @@ function clearSearch() {
   redraw();
 }
 
+// a search costs ~100 ms over 860k points; typing "Bonanza" ran it seven times (10-24)
+let searchTimer = null;
 document.getElementById('search-input').addEventListener('input', function() {
-  doSearch(this.value);
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => doSearch(this.value), 120);
 });
 
 // ── Map style toggle ──────────────────────────────────────────────────────
@@ -1025,7 +1032,11 @@ function altColor(altFt) {
   const low = 1 - Math.max(0, Math.min(15000, altFt || 0)) / 15000;   // 1 at ground
   return isDark ? viridis(0.25 + low * 0.75) : viridis(low * 0.85);
 }
+// altitude -> colour string, 256 steps, rebuilt with the legend (night/day):
+// altColor() built an array and a string per point on every redraw (10-24)
+const ALT_LUT = new Array(256);
 function drawLegend() {
+  for (let i = 0; i < 256; i++) ALT_LUT[i] = altColor(i / 255 * 15000);
   const stops = [];
   for (let i = 0; i <= 10; i++) stops.push('rgb(' + altColor(i * 1500) + ') ' + (i * 10) + '%');
   document.getElementById('alt-ramp').style.background = 'linear-gradient(to right,' + stops.join(',') + ')';
@@ -1088,11 +1099,15 @@ const CanvasLayer = L.Layer.extend({
     const w     = this._canvas.width;
     const h     = this._canvas.height;
     ctx.clearRect(0, 0, w, h);
+    this.lastCount = 0;
     if (lo === undefined) return;
 
     // Find points in time window using binary search
     const pts = getPtsInRange(lo, hi);
+    this.lastCount = pts.length;              // redraw() shows it; it used to select the points again
     if (!pts.length) return;
+    // a search's match per AIRCRAFT, not per point (two toUpperCase() per point before, 10-24)
+    const hit = searchActive ? new Uint8Array(ACS.length) : null;   // 0 unknown, 1 no, 2 yes
 
     // Density: DIFFERENT aircraft per grid cell (owner, 2026-10-02: two planes
     // looked like ten). It used to count positions, and at 2-second logging a
@@ -1115,13 +1130,18 @@ const CanvasLayer = L.Layer.extend({
     const range = hi - lo;
     for (const p of projected) {
       const age       = (hi - p.t) / range;
-      const matched   = !searchActive || matchesSearch(p.orig);
+      let matched = true;
+      if (hit) {
+        const k = p.orig[13];
+        if (!hit[k]) hit[k] = matchesSearch(p.orig) ? 2 : 1;
+        matched = hit[k] === 2;
+      }
       const d         = cellAc.get(p.key).size;
       const level     = Math.min(1, Math.log(d) / DENSE);       // 0 for one aircraft … 1 for 20+
       const baseAlpha = Math.max(0.06, 1 - age * 0.85) * (0.55 + 0.45 * level);
       const alpha     = matched ? baseAlpha : baseAlpha * 0.08;
       const r         = matched ? sizeFactor(p.orig[6]) * (1 + 1.5 * level) * (searchActive ? 1.5 : 1) : 1;
-      const rgb       = altColor(p.orig[8]);
+      const rgb       = ALT_LUT[(Math.max(0, Math.min(15000, p.orig[8] || 0)) / 15000 * 255) | 0];
 
       ctx.beginPath();
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
@@ -1298,9 +1318,8 @@ function redraw() {
   const edtMin = utcToEdt(_curMin);
   document.getElementById('clock').textContent = edtToDisplay(edtMin);
   document.getElementById('period-lbl').textContent = period(edtMin);
-  // Data lookup uses UTC directly
-  const vis = getPtsInRange(_curMin - _winMin, _curMin);
-  document.getElementById('pt-count').textContent = vis.length.toLocaleString() + ' positions visible';
+  // the count of what draw() just selected (it selected them a second time here, 10-24)
+  document.getElementById('pt-count').textContent = (canvasLayer.lastCount || 0).toLocaleString() + ' positions visible';
   const sl = document.getElementById('timeline');
   sl.value = _curMin;
   const pct = (_curMin/SPAN*100).toFixed(1)+'%';
@@ -1500,36 +1519,10 @@ async function loadData() {
   await showIndex(idx, true);
 }
 
-async function showIndex(idx, live) {
-  // Every hour file that can be had; one that fails (raw.githubusercontent
-  // can serve a new live.json minutes before a brand-new hour file) no
-  // longer fails the whole load: the map draws the rest and says so, and
-  // the next refresh tries again (10-24).
-  const got = await Promise.allSettled(idx.chunks.map(async c => {
-    if (chunkCache[c.name] && chunkCache[c.name].hash === c.hash) return;
-    const {hash, data: body} = await fetchChecked(c);
-    chunkCache[c.name] = {hash, start: body.start, cols: chunkColumns(body)};
-  }));
-  const missing = idx.chunks.filter((c, i) => got[i].status === 'rejected' && !chunkCache[c.name]);
-  if (missing.length === idx.chunks.length && idx.chunks.length) {
-    const e = got.find(r => r.status === 'rejected').reason;
-    document.getElementById('updated').textContent = META ? 'update failed, showing ' + shortTime(SPAN) : 'no data yet (' + e.message + ')';
-    return;
-  }
-  idx = Object.assign({}, idx, {chunks: idx.chunks.filter(c => chunkCache[c.name])});
-  if (live ? VIEW_DAY : VIEW_DAY !== idx.meta.date) return;   // the choice changed while loading
-  const current = new Set(idx.chunks.map(c => c.name));
-  Object.keys(chunkCache).forEach(n => { if (!current.has(n)) delete chunkCache[n]; });
-
-  const view = live ? 'live' : idx.meta.date, switched = view !== CUR_VIEW;
-  CUR_VIEW = view;
-  const atEdge = switched || _curMin >= SPAN - 1;
-  const shift = META && !switched ? (META.start - idx.meta.start) / 60 : 0;
-  META = idx.meta; WX = idx.wx || [];
-  SPAN = META.span_min;
-  // Concatenate the hour files (sorted by name = by time) into one set of
-  // columns, keeping only points inside the 24-hour window.
-  const names = [...idx.chunks.map(c => c.name)].sort();
+// The hour files in the cache, concatenated (sorted by name = by time) into
+// one set of columns, keeping only points inside META's window.
+function assemblePoints(names) {
+  names = [...names].sort();
   let n = 0;
   names.forEach(nm => { n += chunkCache[nm].cols.n; });
   const all = {n: 0, lat: new Float32Array(n), lon: new Float32Array(n), alt: new Float32Array(n),
@@ -1546,7 +1539,58 @@ async function showIndex(idx, live) {
       all.gs[k] = cols.gs[i]; all.track[k] = cols.track[i]; all.vrate[k] = cols.vrate[i];
     }
   });
-  PTS = all;
+  return all;
+}
+
+async function showIndex(idx, live) {
+  // A first open (or another day) draws as the hours arrive, newest first —
+  // "now" needs only the last hour or two, and the map used to stay empty
+  // until the slowest of 25 files (12.6 MB) had landed (10-24). A refresh of
+  // the view already shown waits for all of them as before.
+  const progressive = (live ? 'live' : idx.meta.date) !== CUR_VIEW;
+  const order = [...idx.chunks].sort((a, b) => b.name.localeCompare(a.name));
+  let done = 0, lastPartial = 0;
+  const partial = () => {
+    if (!progressive || (live ? VIEW_DAY : VIEW_DAY !== idx.meta.date)) return;
+    const t = performance.now();
+    if (t - lastPartial < 400) return;         // at most a few redraws a second while files land
+    lastPartial = t;
+    META = idx.meta; WX = idx.wx || []; SPAN = META.span_min;
+    PTS = assemblePoints(idx.chunks.filter(c => chunkCache[c.name]).map(c => c.name));
+    _curMin = SPAN;
+    document.getElementById('timeline').max = SPAN;
+    document.getElementById('updated').textContent = `loading, ${done} of ${idx.chunks.length} hours…`;
+    redraw();
+  };
+  // Every hour file that can be had; one that fails (raw.githubusercontent
+  // can serve a new live.json minutes before a brand-new hour file) no
+  // longer fails the whole load: the map draws the rest and says so, and
+  // the next refresh tries again (10-24).
+  const got = await Promise.allSettled(order.map(async c => {
+    if (chunkCache[c.name] && chunkCache[c.name].hash === c.hash) { done++; return; }
+    const {hash, data: body} = await fetchChecked(c);
+    chunkCache[c.name] = {hash, start: body.start, cols: chunkColumns(body)};
+    done++;
+    partial();
+  }));
+  const missing = order.filter((c, i) => got[i].status === 'rejected' && !chunkCache[c.name]);   // got[] follows order[]
+  if (missing.length === idx.chunks.length && idx.chunks.length) {
+    const e = got.find(r => r.status === 'rejected').reason;
+    document.getElementById('updated').textContent = META ? 'update failed, showing ' + shortTime(SPAN) : 'no data yet (' + e.message + ')';
+    return;
+  }
+  idx = Object.assign({}, idx, {chunks: idx.chunks.filter(c => chunkCache[c.name])});
+  if (live ? VIEW_DAY : VIEW_DAY !== idx.meta.date) return;   // the choice changed while loading
+  const current = new Set(idx.chunks.map(c => c.name));
+  Object.keys(chunkCache).forEach(n => { if (!current.has(n)) delete chunkCache[n]; });
+
+  const view = live ? 'live' : idx.meta.date, switched = view !== CUR_VIEW;
+  CUR_VIEW = view;
+  const atEdge = switched || _curMin >= SPAN - 1;
+  const shift = META && !switched ? (META.start - idx.meta.start) / 60 : 0;
+  META = idx.meta; WX = idx.wx || [];
+  SPAN = META.span_min;
+  PTS = assemblePoints(idx.chunks.map(c => c.name));
   _curMin = atEdge ? SPAN : Math.max(0, Math.min(SPAN, _curMin + shift));
   // a past day opens at its last recorded moment, not at an empty midnight
   if (!live && switched && PTS.n) _curMin = Math.min(SPAN, Math.ceil(PTS.tmin[PTS.n - 1]));
@@ -1990,11 +2034,31 @@ let TRACK_LIST = [];
 const trackCache = {};             // name -> {hash, data}
 const trackLayer = L.layerGroup().addTo(map);
 let trackRequest = 0;
-async function loadTrackFiles() {
-  await Promise.all(TRACK_LIST.map(async c => {
+async function loadTrackFiles(list = TRACK_LIST) {
+  await Promise.all(list.map(async c => {
     if (trackCache[c.name] && trackCache[c.name].hash === c.hash) return;
     try { trackCache[c.name] = await fetchChecked(c); } catch (e) {}
   }));
+}
+const trackHour = name => { const m = name.match(/(\d{4})(\d{2})(\d{2})\/?(\d{2})\.json/);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4]) / 1000 : 0; };
+// Which track files can hold these aircraft's paths: the hours their map
+// points span, plus an hour each side (a path runs on beyond the map's
+// 15,000 ft and 75 miles). Every file — 25, 9.7 MB — was fetched to draw one
+// path before (10-24); showTracks() widens the range if the path reaches a
+// file's edge.
+function trackFilesFor(isWanted) {
+  if (!PTS || !META) return TRACK_LIST;
+  const acHit = ACS.map(a => isWanted(a[0], a[3]));
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < PTS.n; i++) {
+    if (!acHit[PTS.ac[i]]) continue;
+    const t = META.start + PTS.tmin[i] * 60;
+    if (t < lo) lo = t;
+    if (t > hi) hi = t;
+  }
+  if (lo > hi) return TRACK_LIST;
+  return TRACK_LIST.filter(c => { const h = trackHour(c.name); return h + 3600 > lo - 3600 && h <= hi + 3600; });
 }
 function clearTracks() { trackRequest++; trackLayer.clearLayers(); }
 async function showTracks(labels) {
@@ -2002,18 +2066,46 @@ async function showTracks(labels) {
   const req = ++trackRequest;
   trackLayer.clearLayers();
   if (!want.size || !TRACK_LIST.length) return;
-  try { await loadTrackFiles(); } catch (e) { return; }
-  if (req !== trackRequest) return;          // another selection since
-  const byHex = {};
-  TRACK_LIST.map(c => c.name).sort().forEach(n => {
-    const f = trackCache[n] && trackCache[n].data;
-    if (!f) return;
-    Object.entries(f.ac).forEach(([hex, [flight, type, pts]]) => {
-      if (!want.has((flight || '').toUpperCase()) && !want.has(hex.toUpperCase())) return;
-      const t = byHex[hex] = byHex[hex] || {flight, pts: []};
-      pts.forEach(p => t.pts.push([f.start + p[0], p[1], p[2], p[3]]));
+  // A card names one aircraft by its address: that aircraft's path, not every
+  // aircraft that flew the callsign that day (UAL1017 was two, 10-24). An
+  // event names its aircraft by callsign; those match by callsign or address.
+  const addresses = [...want].filter(w => ACS.some(a => (a[3] || '').toUpperCase() === w));
+  const isWanted = addresses.length
+    ? (flight, hex) => want.has((hex || '').toUpperCase()) && addresses.includes((hex || '').toUpperCase())
+    : (flight, hex) => want.has((flight || '').toUpperCase()) || want.has((hex || '').toUpperCase());
+  const gather = names => {
+    const byHex = {};
+    names.map(c => c.name).sort().forEach(n => {
+      const f = trackCache[n] && trackCache[n].data;
+      if (!f) return;
+      Object.entries(f.ac).forEach(([hex, [flight, type, pts]]) => {
+        if (!isWanted(flight, hex)) return;
+        const t = byHex[hex] = byHex[hex] || {flight, pts: []};
+        pts.forEach(p => t.pts.push([f.start + p[0], p[1], p[2], p[3]]));
+      });
     });
-  });
+    return byHex;
+  };
+  // the files around the aircraft's map points; one more on either side
+  // while a path reaches the edge of what was fetched
+  let names = trackFilesFor(isWanted), byHex = {};
+  for (let step = 0; step < TRACK_LIST.length; step++) {
+    try { await loadTrackFiles(names); } catch (e) { return; }
+    if (req !== trackRequest) return;          // another selection since
+    byHex = gather(names);
+    const have = new Set(names.map(c => c.name));
+    const hours = names.map(c => trackHour(c.name));
+    const lo = Math.min(...hours), hi = Math.max(...hours) + 3600;
+    const tracks = Object.values(byHex);
+    // airborne points decide: an airliner parked overnight at Dulles with its
+    // transponder on would otherwise pull in every file back to the evening before
+    const air = tracks.flatMap(t => t.pts.filter(p => p[3] > 0));
+    const first = Math.min(...air.map(p => p[0])), last = Math.max(...air.map(p => p[0]));
+    const more = TRACK_LIST.filter(c => !have.has(c.name) && ((first - lo < 90 && trackHour(c.name) === lo - 3600) ||
+                                                              (hi - last < 90 && trackHour(c.name) === hi)));
+    if (!air.length || !more.length) break;
+    names = names.concat(more);
+  }
   Object.values(byHex).forEach(t => {
     t.pts.sort((a, b) => a[0] - b[0]);
     const segs = [[]];

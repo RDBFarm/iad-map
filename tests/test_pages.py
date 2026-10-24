@@ -380,6 +380,20 @@ class Pages(unittest.TestCase):
         self.assertEqual(errors, [])
         pg.close()
 
+    def test_a_tapped_flight_fetches_only_the_track_files_it_spans(self):
+        # every track file (25 a day, 9.7 MB) was fetched to draw one path (10-24)
+        pg, errors = self.open("live.html")
+        fetched = []
+        pg.on("request", lambda r: fetched.append(r.url) if "/t/" in r.url else None)
+        pg.fill("#search-input", "UAL100")            # the first arrival: 13 minutes, inside the first hour
+        pg.wait_for_timeout(500)
+        pg.click("#search-results .search-result >> nth=0")
+        pg.wait_for_timeout(2500)
+        self.assertGreater(pg.evaluate("trackLayer.getLayers().length"), 0, "its path is drawn")
+        self.assertLessEqual(len(fetched), 2, fetched)    # its hour and the one after; the log has three
+        self.assertEqual(errors, [])
+        pg.close()
+
     def test_busy_times_public_page_has_no_farm(self):
         pg, errors = self.open("busy.html?public", data=self.site_url + "no-such-branch/")
         self.assertEqual(errors, [])
