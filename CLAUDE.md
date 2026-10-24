@@ -167,6 +167,8 @@ sandbox's Chromium on the real 10-23 files (860,722 points, 25 hour files,
   2,227; 4.7% of points): 39% are first heard above 500 ft so the climb rule
   never starts, and GA-flagged points (60% of all) skip the filter. The
   toggle shows the split as the rules make it; it does not fix the rule.
+  **Installed 10-24 (112f2bc, by 12:45 PM EDT) and checked by him on the live
+  map:** "the take offs look just like I would imagine they would."
   A better rule can be judged against the busy rule's take-offs (the review's
   method, `q2_arr_dep.py`); not attempted.
 - **(#3) One farm rule, the forecast's:** the live map's headline is now
