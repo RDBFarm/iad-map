@@ -19,6 +19,8 @@
   .btn { background:rgba(255,255,255,0.08); color:#dde; border:1px solid rgba(255,255,255,0.18); border-radius:6px;
     padding:5px 10px; font-size:0.78rem; cursor:pointer; text-decoration:none; white-space:nowrap; font-family:inherit; }
   .btn.on { background:rgba(253,231,37,0.18); border-color:rgba(253,231,37,0.6); color:#fff; }
+  .btn.on::before { content:"✓ "; }   /* the pressed one by shape too, not only the tint (10-24) */
+  @media (max-width:640px) { .btn, #aps .ap-row { min-height:40px; } .btn { display:inline-flex; align-items:center; } }
   #map { position:absolute; top:52px; left:0; right:0; bottom:0; background:#0a0a14; }
   .panel { position:absolute; z-index:1000; background:rgba(10,10,20,0.9); border:1px solid rgba(255,255,255,0.1);
     border-radius:10px; padding:10px 14px; font-size:0.72rem; color:#ccd; line-height:1.5; }
@@ -442,7 +444,9 @@ async function show() {
   // one image at a time (memory on the iPad): back to weights and added up per size
   for (const k of keys) {
     let im;
-    try { im = await loadImage(k); } catch (e) { if (req === showRequest) info.textContent = what + ' · could not load (' + e.message + ')'; return; }
+    // a missing image is the usual case (that wind or airport has no hours yet); the browser's
+    // own wording ("The source image cannot be decoded") said nothing useful (10-24)
+    try { im = await loadImage(k); } catch (e) { if (req === showRequest) info.textContent = what + ' · no image published for this choice yet'; return; }
     if (req !== showRequest) return;
     const [ms, mb] = imgInfo(k).max;
     [[im.s, ms, S], [im.b, mb, B]].forEach(([q, top, sum]) => {

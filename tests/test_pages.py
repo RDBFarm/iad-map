@@ -69,7 +69,7 @@ class Pages(unittest.TestCase):
         cls.site.shutdown()
         cls.data.shutdown()
 
-    def open(self, page_name, width=1280, height=800, hash_="", data=None, fulfil=None):
+    def open(self, page_name, width=1280, height=800, hash_="", data=None, fulfil=None, abort=()):
         pg = self.browser.new_page(viewport={"width": width, "height": height})
         errors = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
@@ -81,6 +81,8 @@ class Pages(unittest.TestCase):
                 js = url.split("?")[0].endswith(".js")
                 return r.fulfill(path=os.path.join(dist, "leaflet.js" if js else "leaflet.css"),
                                  content_type="application/javascript" if js else "text/css")
+            if any(part in url for part in abort):
+                return r.abort()
             for part, body in (fulfil or {}).items():
                 if part in url:
                     return r.fulfill(body=body, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"})
@@ -273,6 +275,109 @@ class Pages(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertIn(f"{round(seed['share']['S'] * 100)}% of its arrivals", pg.evaluate("document.getElementById('fc-about').textContent"))
         self.assertIn("The Pi is counting its own numbers (3 of 336 hours so far)", pg.inner_text("#fc-record"))
+        pg.close()
+
+    BOX = """s => { const e = document.querySelector(s); if (!e || e.hidden) return null;
+        const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; }"""
+
+    def assert_clear(self, pg, pairs, label):
+        for a, b in pairs:
+            ra, rb = pg.evaluate(self.BOX, a), pg.evaluate(self.BOX, b)
+            if ra is None or rb is None:
+                continue
+            ox = min(ra[2], rb[2]) - max(ra[0], rb[0])
+            oy = min(ra[3], rb[3]) - max(ra[1], rb[1])
+            self.assertFalse(ox > 0 and oy > 0, f"{label}: {a} over {b} by {ox:.0f} x {oy:.0f} px")
+
+    def test_panels_stay_clear_of_each_other(self):
+        # At 390 px the legend and weather card sat 30 px inside the control bar and 114 px over
+        # each other; at 1280 x 800 a long search list reached the legend (10-24).
+        pairs = [("#leg", "#controls"), ("#wx", "#controls"), ("#ev-card", "#controls"), ("#leg", "#wx"),
+                 ("#search-panel", "#ap-panel"), ("#search-panel", "#leg"), ("#search-panel", "#wx"),
+                 ("#hdr", "#search-panel"), ("#hdr", "#ap-panel")]
+        for width, height in ((390, 844), (1280, 800)):
+            pg, errors = self.open("live.html", width=width, height=height)
+            self.assert_clear(pg, pairs, f"{width} px")
+            if width == 390:
+                pg.click("#ap-panel h3")
+                pg.wait_for_timeout(200)
+                self.assert_clear(pg, pairs, f"{width} px, categories open")
+                pg.click("#ap-panel h3")
+            pg.fill("#search-input", "UAL")             # every airliner in the made-up log
+            pg.wait_for_timeout(500)
+            self.assert_clear(pg, pairs, f"{width} px, search results")
+            pg.click("#search-results .search-result >> nth=0")
+            pg.wait_for_timeout(800)
+            self.assertFalse(pg.evaluate("document.getElementById('ev-card').hidden"))
+            self.assert_clear(pg, pairs, f"{width} px, card open")
+            # the header's subtitle can wrap (the "Pi may be offline" note): the panels follow it
+            pg.evaluate("document.getElementById('updated').textContent = 'updated 9:30 PM — 5.8 h ago, the Pi may be offline, and more words to wrap the line'")
+            pg.wait_for_timeout(300)
+            self.assert_clear(pg, pairs, f"{width} px, wrapped header")
+            self.assertEqual(errors, [])
+            pg.close()
+
+    def test_day_map_text_is_readable(self):
+        # toggleMapStyle() recoloured what it knew; the panel headings and search rows stayed
+        # light on the light panels (10-24)
+        pg, errors = self.open("live.html")
+        pg.fill("#search-input", "UAL")
+        pg.wait_for_timeout(300)
+        pg.click("#btn-mapstyle")
+        pg.wait_for_timeout(500)
+        for sel in ("#search-panel h3", "#events h3", ".sr-time", ".sr-type", ".sr-name", "#leg h3", ".leg-note", "#search-count"):
+            rgb = pg.evaluate("s => getComputedStyle(document.querySelector(s)).color", sel)
+            parts = [int(x) for x in rgb.strip("rgba()").split(",")[:3]]
+            self.assertLess(max(parts), 120, f"{sel} is {rgb} on the day map's light panel")
+        self.assertEqual(errors, [])
+        pg.close()
+
+    def test_a_missing_hour_file_still_draws_the_rest(self):
+        # raw.githubusercontent can serve a new live.json before a brand-new hour file:
+        # one failed fetch used to fail the whole first load (10-24)
+        lost = self.index["chunks"][0]["name"]
+        pg, errors = self.open("live.html", abort=(lost,))
+        self.assertGreater(pg.evaluate("PTS.n"), 0)
+        self.assertIn("1 hour missing, retrying at the next refresh", pg.inner_text("#updated"))
+        self.assertEqual(errors, [])
+        pg.close()
+
+    def test_weather_card_before_the_first_report(self):
+        pg, errors = self.open("live.html")
+        text = pg.evaluate("""() => { WX = [{t: 600, tmpf: 50, sknt: 0, drct: 0, compass: 'N', vsby: 10, sky: 'Clear', wx: null, gust: null}];
+            updateWeather(0); return [document.getElementById('wx-time').textContent, document.getElementById('wx-temp').textContent]; }""")
+        self.assertTrue(text[0].startswith("first report"), text)      # not a report 10 minutes in the future
+        self.assertEqual(text[1], "—")
+        pg.close()
+
+    def test_farm_summary_counts_passes_and_aircraft(self):
+        # summary.aircraft counts passes: 51 "aircraft" on 10-18 were 51 passes by 49
+        pg, errors = self.open("live.html")
+        text = pg.evaluate("""() => { drawFarm({center: FARM_CENTER || [39.15, -77.46], passes: [
+              {hex: 'a1', rule: 'parcel', alt_agl: 5000}, {hex: 'a1', rule: 'parcel', alt_agl: 7000},
+              {hex: 'b2', rule: 'parcel', alt_agl: 9000}, {hex: 'c3', rule: 'parcel', alt_agl: 800, prop: true}],
+            summary: {aircraft: 3, median_agl: 7000, lowest_agl: 5000, under_highlight: 0, highlight_agl: 1600, props_excluded: 1, rule: 'parcel'}});
+            return document.getElementById('farm-summary').innerText; }""")
+        self.assertIn("3 passes by 2 aircraft", text)
+        self.assertEqual(errors, [])
+        pg.close()
+
+    def test_busy_times_labels_midnight_and_partial_blocks(self):
+        tz = ZoneInfo("America/New_York")
+        start = int(datetime.datetime.combine(datetime.datetime.now(tz).date(), datetime.time(), tz).timestamp())
+        times = [start + 3600 * i for i in range(7 * 24)]
+        om = json.dumps({"hourly": {"time": times, "wind_speed_10m": [10] * len(times), "wind_direction_10m": [180] * len(times)}})
+        pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/", fulfil={"api.open-meteo.com": om})
+        self.assertEqual(pg.evaluate("quarter(96)"), "12:00 AM")          # was "12:00 PM" (10-24)
+        self.assertEqual(pg.evaluate("quarter(0)"), "12:00 AM")
+        # today's first block has already started: its chip says from when it counts
+        partial = pg.evaluate("FCDAYS[0].hours.findIndex(Boolean) % 6 !== 0")
+        chip = pg.evaluate("(document.querySelector('#fc-blocks .chip small') || {}).textContent || ''")
+        self.assertEqual(bool(chip), partial, chip)
+        if partial:
+            self.assertRegex(chip, r"^from \d+[ap]$")
+        self.assertEqual(pg.get_attribute("[data-kind=a]", "aria-pressed"), "true")
+        self.assertEqual(errors, [])
         pg.close()
 
     def test_busy_times_public_page_has_no_farm(self):
