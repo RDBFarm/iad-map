@@ -89,18 +89,22 @@ AIRPORTS = {
     "KNYG": (38.5036, -77.3050, "Quantico MCAF"),
 }
 
-# Runway headings (both directions) for each airport
-# Used to score alignment between aircraft track and runway centerline
+# Runway headings (both directions) for each airport, TRUE degrees, as ADS-B
+# reports track (OurAirports runways.csv, le_heading_degT; checked 2026-10-24
+# against real finals: Dulles landings track 180.8° south, 0.7° north).
+# Until 2026-10-24 the table held the runway numbers read as degrees
+# (KIAD "01/19" as 19 and 199), 18° off true: a fifth of Dulles's own
+# short-final points scored as "en route" (the same copy is in live.html).
 AIRPORT_RUNWAYS = {
-    "KIAD": [19, 199, 120, 300],   # 01/19, 12/30
-    "KDCA": [19, 199, 150, 330],   # 01/19, 15/33
-    "KBWI": [100, 280, 150, 330],  # 10/28, 15/33
-    "KJYO": [170, 350],            # 17/35
-    "KGAI": [140, 320],            # 14/32
-    "KHEF": [160, 340],            # 16/34
-    "KRMN": [150, 330],            # 15/33
-    "KADW": [10, 190],             # 01/19 (parallel runways same heading)
-    "KNYG": [20, 200],             # 02/20
+    "KIAD": [1, 181, 110.6, 290.6],          # 01/19, 12/30
+    "KDCA": [356, 176, 26, 206, 142.7, 322.7],  # 01/19, 04/22, 15/33
+    "KBWI": [94.2, 274.2, 33, 213, 144.2, 324.2],  # 10/28, 04/22, 15/33
+    "KJYO": [161, 341],                      # 17/35
+    "KGAI": [127.4, 307.4],                  # 14/32
+    "KHEF": [150.6, 330.6],                  # 16/34
+    "KRMN": [139.2, 319.2],                  # 15/33
+    "KADW": [360, 180],                      # 01/19 (parallel runways same heading)
+    "KNYG": [15, 195],                       # 02/20
 }
 
 # GA category codes — these get proximity-only classification
@@ -406,9 +410,10 @@ COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
            "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
 
 
-def fetch_weather(start, hours=None):
-    """KIAD METARs from aviationweather.gov. Any failure gives no weather.
-    `hours` widens the look-back (for a finished day's file)."""
+def fetch_weather(start, hours=None, on_fail=[]):
+    """KIAD METARs from aviationweather.gov. Any failure gives `on_fail`
+    (no weather; None where the caller must tell a failed fetch from an
+    empty one). `hours` widens the look-back (for a finished day's file)."""
     url = re.sub(r"hours=\d+", f"hours={int(hours)}", WX_URL) if hours else WX_URL
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "rdbf-iad-map"})
@@ -416,7 +421,7 @@ def fetch_weather(start, hours=None):
             obs = json.load(r)
     except Exception as e:
         print("publish: no weather this time:", e, flush=True)
-        return []
+        return on_fail
     out = []
     for o in obs if isinstance(obs, list) else []:
         try:
@@ -504,8 +509,12 @@ def read_final():
                 os.makedirs(os.path.dirname(new_path), exist_ok=True)
                 os.replace(old_path, new_path)
             n = new
-        if os.path.exists(os.path.join(WORK_DIR, n)):
-            out.add(n)
+        try:
+            # an empty file (a power cut mid-write) is not final: built again
+            if os.path.getsize(os.path.join(WORK_DIR, n)) > 0:
+                out.add(n)
+        except OSError:
+            pass
     return out
 
 
@@ -523,6 +532,15 @@ def day_bounds(date):
 def file_hash(path):
     with open(path, "rb") as f:
         return hashlib.sha1(f.read()).hexdigest()[:12]
+
+
+def day_lacks_wx(name):
+    """True if the day file on disk carries no weather reports."""
+    try:
+        with open(os.path.join(WORK_DIR, name), "rb") as f:
+            return not json.load(f).get("wx")
+    except (OSError, ValueError):
+        return False
 
 
 def kept_files(final, end):
@@ -545,8 +563,15 @@ def kept_files(final, end):
     return kept, oldest
 
 
-def day_file(date, names, now, final_names):
-    """The index of one finished local day, from its hour files on disk."""
+WX_RETRY_DAYS = 3   # a day's file waits this long for its weather before going without
+
+
+def day_file(date, names, now, final_names, need_wx=True):
+    """The index of one finished local day, from its hour files on disk.
+    Returns None when the weather could not be fetched and `need_wx`: the
+    file is final once written, and 2026-10-21's went out with no weather
+    at all because it was built during the name-lookup outage. The caller
+    tries again on later runs and gives up after WX_RETRY_DAYS."""
     start, end = day_bounds(date)
     chunks, trk, positions, aircraft, first = [], [], 0, set(), None
     for n in sorted(names):
@@ -568,7 +593,12 @@ def day_file(date, names, now, final_names):
               if start <= e.get("t", e.get("cpa_t", 0)) < end]
           for k in ("emergencies", "close_approaches", "tcas")}
     passes = [p for p in proximity.recent(EVENTS_DIR, "farm_passes.jsonl", start) if p.get("t", 0) < end]
-    wx = [w for w in fetch_weather(start, hours=math.ceil((now - start) / 3600) + 1) if w["epoch"] < end]
+    wx = fetch_weather(start, hours=math.ceil((now - start) / 3600) + 1, on_fail=None)
+    if wx is None:
+        if need_wx:
+            return None
+        wx = []
+    wx = [w for w in wx if w["epoch"] < end]
     index = {
         "meta": {"start": start, "end": end, "built": end, "span_min": (end - start) // 60,
                  "positions": positions, "aircraft": len(aircraft), "date": date.isoformat(),
@@ -703,8 +733,12 @@ def write_files(files):
                     continue
         except OSError:
             pass
-        with open(path, "wb") as f:
+        # whole or absent, never half-written: a power cut during a plain
+        # write can leave a settled hour's file empty, and it is read back
+        # as it is for 30 days
+        with open(path + ".tmp", "wb") as f:
             f.write(body)
+        os.replace(path + ".tmp", path)
 
 
 def write_tree(index, files):
@@ -786,13 +820,21 @@ def archive(index, files, final, end):
     while date < local_day(end):
         name = f"d/{date.isoformat()}.json"
         day_end = day_bounds(date)[1]
-        if name not in files and day_end + SETTLE_S <= end:
+        recent = end - day_end <= WX_RETRY_DAYS * 86400
+        # a day written without weather (the fetch failed that night) is
+        # built again while it is recent, so the weather can still arrive
+        retry = name in files and recent and files[name] is None and day_lacks_wx(name)
+        if (name not in files or retry) and day_end + SETTLE_S <= end:
             day_hours = [n for n in hour_names if n in final
                          and day_bounds(date)[0] <= tracks.parse_name(n)[1] < day_end]
             if any(n.startswith("h/") for n in day_hours):
                 try:
-                    files[name] = day_file(date, day_hours, end, final)
-                    final.add(name)
+                    body = day_file(date, day_hours, end, final, need_wx=recent)
+                    if body is None:
+                        print(f"publish: day file {name} waits for its weather", flush=True)
+                    elif not retry or json.loads(body)["wx"]:
+                        files[name] = body
+                        final.add(name)
                 except Exception as e:     # never let this stop the map
                     print(f"publish: day file {name} failed:", e, flush=True)
         date += datetime.timedelta(days=1)

@@ -29,7 +29,7 @@ with wind/airport/take-off choices; Wide = 200 mi, every height, radio beacons),
 15 minutes, by day of the week; from 10-23; with a 7-day forecast of planes over
 the farm, left off as `busy.html?public` from `flights.html`).
 
-**Tests:** `python3 -m unittest discover -s tests -v` (53 tests, ~55 s;
+**Tests:** `python3 -m unittest discover -s tests -v` (62 tests, ~75 s;
 the page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`
 and `LEAFLET_DIST=<leaflet dist folder>` when there is no network). They run on
 every PR and push (`.github/workflows/tests.yml`). `tests/fixture.py` is a
@@ -43,15 +43,67 @@ test); repo 363 MB compressed with the 30-day window.
 
 **Still open:** drive growth per day and publisher memory on the real Pi were
 never measured (he declined self-reporting health for now, 10-18); close-
-approach thresholds (first guesses; he only sees jets ones); runway headings in
-the classifier (magnetic vs true); live map panels overlap at phone width
-(weather card over the altitude legend). **Farm forecast, new 10-23:** the first scores
+approach thresholds (first guesses; he only sees jets ones); live map panels overlap at phone width
+(weather card over the altitude legend; fix in the second 10-24 review PR). **Farm forecast, new 10-23:** the first scores
 (`score.by_lead` in `farm-model.json`) should appear from 10-24; the page shows a line once
 a lead has 4 scored blocks. The rule's choices (2 mi, 6,000 ft, blocks) are mine, not yet confirmed.
 **Scheduled tasks** (each starts its own session; moved off the 10-14–10-24 session
 when it was archived): 10-25 10 AM (are the scores coming in), 11-19 (UA 2853 on
 11-21: wind, seat, the light at the farm; re-check the middle runway), 2027-01-15
 (777-9 deliveries: drop `B779`).
+
+### Review of 10-23/24 (speed, accuracy, usability) — what it found and what changed
+Three parallel reviews (the Pi programs, the pages, the rules run over 6 real
+days of `t/` files, 10-16 and 10-18 – 10-22); every number below was measured.
+**First PR (Pi side, merged 10-24, needs the installer run):**
+- **Runway headings were a typo, not magnetic vs true:** `AIRPORT_RUNWAYS`
+  held runway *numbers* read as degrees (KIAD "01/19" as 19/199). True
+  headings are 1°/181° (OurAirports; real finals measure 180.8° / 0.7°). The
+  18° penalty scored 21.7% of KIAD landers' own short-final points "en route"
+  (12.9% with the right table; 2.1% of all live-map points change airport —
+  en route→KIAD 24,612, →KBWI 14,862, →KDCA 11,652). Affects airport toggles
+  and the heat map's by-airport split only; the arrival filter's heading rule
+  runs on 0.36% of points (those without a vertical rate) and misclassified 0.
+  Hours already frozen keep the old labels.
+- **Heat map wind:** every hour had gone into the wind grid of the hour
+  before (the :52 report before the hour was seen first and kept); now an
+  hour not yet counted takes the nearest report. Hours counted before
+  10-24 stay where they are (not re-sorted: it would mean rebuilding every
+  hour from the log, and the two reports are an hour apart).
+- **A day's weather lost for good** when the fetch failed the night its
+  `d/` file was built (`d/2026-10-21.json` has 0 reports; neighbours 24).
+  Now the day file waits for its weather, up to `WX_RETRY_DAYS` = 3, and a
+  recent day already on disk without weather is built again.
+- **Pruning could empty the whole log:** the loop deleted a day at a time
+  until 15 GB was free with nothing checking that space came back — and it
+  does not while a publish query holds the WAL (free space *falls*). With
+  free space pinned at 9 GB one call deleted all 3 fixture days. Now one
+  hour per call, again at the next commit while it helps, and it stops when
+  a deletion freed nothing. The drive was 11% full on 10-21, so this had
+  not fired. **Check on the Pi once:** `sudo -u iadmap python3 -c "import sqlite3;print(sqlite3.connect('file:/mnt/flightdata/iad-map/flights.db?mode=ro',uri=True).execute('PRAGMA auto_vacuum').fetchone())"` should print `(2,)`; `(0,)` would mean deleting never returns space.
+- **The collector lost up to 30 s of readings at every stop** (no SIGTERM
+  handler: measured 0 rows saved); every installer re-run and reboot. It
+  now saves the buffer on the way out.
+- Sorts in `tracks.hour_file` and `farm.update` went through a temp file
+  (likely the SD card; ~18 MB a run): `PRAGMA temp_store = MEMORY`, as the
+  wide map already had. Hour files are written whole (`.tmp` + rename) and an
+  empty one is no longer final.
+- Measured, not changed: the publisher loads the whole 24 h window every run
+  (1.04 M in-area points, ~660–760 MB RSS on a synthetic log of that size,
+  sandbox) — the floor on a 2 GB Pi; querying only unfrozen hours is a
+  medium–large change, not done.
+**Waiting on his decision (not changed):** (#2) 69% of KIAD take-offs keep
+their climb on the live map (1,545 of 2,227; 4.7% of points): 39% are first
+heard above 500 ft so the climb rule never starts, and GA-flagged points (60%
+of all) skip the filter — a toggle like the heat map's, or a stricter rule;
+(#3) the live map's "over the farm" (parcel crossings, props out, ~40–50/day)
+and the forecast's rule (2 mi under 6,000 ft, props in: 6–25/day north flow,
+312 on south-flow 10-16) are different quantities under the same words.
+Also measured: the busy rule reproduces `busy.json` exactly and balances
+(2,178 landings / 2,227 take-offs over 5 days); its error is reception —
+5.8% of landings and 8.0% of take-offs vanish or appear at 1,500–5,000 ft and
+are never counted; double counts ≤4 in 4,405. Type lookup: 66 of 11,121
+aircraft untyped (0.6%), corporate callsigns, not airlines.
 
 ### How to change something on the Pi
 All Pi code is in `pi/` on `main`. Merge the change, then have him run on
@@ -205,7 +257,7 @@ receiver: 291 aircraft (271 with position), ~1,683 messages/sec.
 
 See `README.md` for how to install. In short:
 
-- **`pi/collector.py`** — logs to SQLite at **`/mnt/flightdata/iad-map/flights.db`**. One row per aircraft per read, for every aircraft with a new message: all ranges and altitudes, with or without position. Buffers and commits every 30 s. **Refuses to start if `/mnt/flightdata` isn't mounted.** Deletes nothing.
+- **`pi/collector.py`** — logs to SQLite at **`/mnt/flightdata/iad-map/flights.db`**. One row per aircraft per read, for every aircraft with a new message: all ranges and altitudes, with or without position. Buffers and commits every 30 s, and saves the buffer when systemd stops it (from 10-24; before, up to 30 s of readings died with every restart). **Refuses to start if `/mnt/flightdata` isn't mounted.** Deletes nothing until the drive is nearly full (Retention, below).
 - **`pi/publish.py`** — every 15 min (systemd timer): last 24 h, within **75** statute mi of KIAD (50 until 10-18: his "Yes, widen to 75 miles", after it measured ~21% more traffic below 15,000 ft; hours already frozen keep 50; the history heat map stays at 50 via `HEAT_RADIUS_NM`), ≤15,000 ft → one JSON file per UTC hour plus `live.json` on the **`live-data`** branch, as a single commit replaced and force-pushed, plus `live-data-prev` (same files, with the previous push as parent). Each push sends only the current hour and the index.
   - **Fixed 09-26: every push was sending the whole tree (~18 MiB, ~1.8–2.1 GiB/day measured with vnstat on the Pi).** Two causes. (1) Git skips files the remote has only when the remote's commit is a *parent* of the pushed one; an amended single commit has none, so git sent all ~57 MiB of files every run (reproduced locally: one changed file, 19.6 MiB sent). `live-data-prev` supplies the parent link. (2) Finished hour files were rebuilt each run and some changed: e.g. an aircraft last heard low that reappears hours later climbing makes the departure rule drop points from the old hour (shown in a test). Now an hour file is built once, `SETTLE_S` (10 min) after the hour ends, and read back from disk after that; the list of final files is kept in `publish/.git/iad-map-final-hours`. Same for `t/`. On a simulated day the pushes went from ~2,300 KiB each to 17–130 KiB. **Verified on the Pi 09-26** (installed 12:4x EDT, `vnstat -5 -i eth0`): push blocks went from 20.8–22.1 MiB tx to 4.9–5.1 MiB, about 0.4–0.5 MiB above the neighbouring quiet blocks (4.5–4.7 MiB), including the first run after install. Pushes with a **deploy key** scoped to this repo only.
 - **Classification** — `classify_airport()`, `is_arrival()` and the climb-sequence departure rule copied from `render_github.py`. The departure rule runs on each aircraft's points thinned to ≥10 s (the spacing it was written for); the map itself is never thinned. **Decided 09-26: a rise counts toward a climb only when the thinned points are ≤60 s apart** (`CLIMB_MAX_GAP_S`; suggested by the Pi/network session, his call). Before it, an aircraft last heard low and heard again hours later higher up read as one climb, and its earlier arrival points were dropped. Frozen hours keep the old rule; only hours built after the installer run use it. Fixed 09-24: GA flag requires an N-number, not any N-callsign (Spirit, NKS, was caught); two-letter airline hints removed.
@@ -219,12 +271,12 @@ See `README.md` for how to install. In short:
 
 ### Decided 09-24
 - **Sampling interval: 2 s** (`IADMAP_INTERVAL_S`).
-- **Retention: keep the log until the drive is nearly full.** Built as: below 10 GB free, the collector deletes the oldest day at a time until 15 GB is free (`IADMAP_PRUNE_BELOW_GB` / `_TO_GB`); the database uses incremental auto-vacuum so the space really returns. Event logs in `events/` are never pruned. Growth estimate (not measured): ~1 GB/day, so ~7 months before pruning starts — measure after a day of running.
+- **Retention: keep the log until the drive is nearly full.** Built as: below 10 GB free, the collector deletes the oldest hour at a time (one per call, again after the next 30 s commit while deleting helps) until 15 GB is free (`IADMAP_PRUNE_BELOW_GB` / `_TO_GB`), and stops when a deletion gave no space back (from 10-24; until then it looped a day at a time with no such check and could empty the log, §0); the database uses incremental auto-vacuum so the space really returns. Event logs in `events/` are never pruned. Growth estimate (not measured): ~1 GB/day, so ~7 months before pruning starts — measure after a day of running.
 - **Helicopters count** for the over-the-farm figure and alerts, for now.
 - **The office is not to go on the map** — the property line is already there.
 
-### Still OPEN
-- **Runway headings** in the copied classifier are runway numbers (magnetic); ADS-B track is true. KIAD listed as 19/199. Check with real traffic.
+### Settled 10-24
+- **Runway headings:** the copied table held runway *numbers* read as degrees (KIAD 19/199); neither true nor magnetic. Replaced with true headings (OurAirports), which real finals confirm (§0, review). The same table sits in `live.html` (`isArrivalPt`).
 
 ### After installing, check
 - Done 09-24: aircraft types come through (via the lookup); the aviationweather.gov weather feed parses.
@@ -302,7 +354,7 @@ See `README.md` for how to install. In short:
 - Published as `heat.png` (8-bit greyscale, log-scaled: `round(255·ln(1+w)/ln(1+max))`) + `heat.json` on `live-data`, **at most once a day** (~150 KB for 3 test hours; expect ~1 MB when full), so the upload stays small (HubDuo). Image build 0.5 s in the sandbox.
 - **`heat.html`**: Leaflet, dark basemap, viridis (colourblind-friendly), transparent where empty, contrast slider; legend folds on a phone. Linked from both live pages (history icon, a clock with a counter-clockwise arrow, drawn as inline SVG since there is no emoji for it; was 🔥 until 09-30; header buttons are icon-only on phones now).
 
-- **By wind (09-27, his request):** "I want to be able to type a degree or use a pointer to move the wind position. So we can see what the heat map looks like when the wind is blowing at any one direction." Each hour also goes into a grid for KIAD's wind at the time: the report nearest the middle of the hour, direction the wind blows **from**, to 10° (`heat/wind/000..350.f32`), or `calm` (calm or variable). Winds are kept per hour in `heat/state.json` as reports arrive; the first run fetches up to 168 h back once for the logbook's early hours. An hour waits up to 30 h for its wind, then goes into the all-winds grid only (`no_wind_hours`). Only wind grids that got new hours are re-imaged, once a day (`heat/<key>.png`), so the daily upload is the all-winds image plus a few wind images (expected ~1–5 MB/day once full; 50–80 KB per wind-hour on test data).
+- **By wind (09-27, his request):** "I want to be able to type a degree or use a pointer to move the wind position. So we can see what the heat map looks like when the wind is blowing at any one direction." Each hour also goes into a grid for KIAD's wind at the time: the report nearest the middle of the hour, direction the wind blows **from**, to 10° (`heat/wind/000..350.f32`), or `calm` (calm or variable). Winds are kept per hour in `heat/state.json` as reports arrive (an hour not yet counted takes the nearest report seen so far, `wind_d`; until 10-24 the first seen was kept, which was the hour before's :52 report, so hours counted before then sit in the wind grid of the hour before them — §0, review); the first run fetches up to 168 h back once for the logbook's early hours. An hour waits up to 30 h for its wind, then goes into the all-winds grid only (`no_wind_hours`). Only wind grids that got new hours are re-imaged, once a day (`heat/<key>.png`), so the daily upload is the all-winds image plus a few wind images (expected ~1–5 MB/day once full; 50–80 KB per wind-hour on test data).
 - `heat.html`: a dial (drag the pointer; rim ticks show hours per direction), a degree box, a ± range (0–180°), All winds / Calm. A range adds the chosen images back in weight terms and re-scales the sum. Checked against the Pi's grids on test data: one direction and ±180° light exactly the cells the grids do.
 
 - **Installed and verified 09-27** (installer run ~3:30 PM): first heat build covered 77 hours, Thu Sep 24 10 AM – Sun Sep 27 3 PM, 10,194 aircraft-hours, all with a wind report. Only northerly winds so far (310°–050°; most hours at 320° and 000°/350°), so south-flow views are empty until the wind turns. First upload of all images 2.9 MB (heat.png 834 KB, wind images 55–324 KB each); after that, heat.png plus the wind images that got new hours, once a day.
@@ -349,7 +401,7 @@ See `README.md` for how to install. In short:
 
 ### 30-day history (built 09-26, his request)
 - He first put it on hold until the Barn Office HubDuo hangs after uploads are explained, then (same day): "as long as the file sizes don't change with the longer timeline on the webpage I am comfortable changing that now." So the condition is upload size, and it was measured.
-- **Pi (`publish.py`, `tracks.py`):** finished hours (already frozen since PR #34) are kept `KEEP_DAYS` = 30 local days instead of leaving with the 24 h window. They stay on disk and are **never read back into memory** (30 days ≈ 1.5 GB; the Pi has 2 GB). Files live in a folder per UTC day, `h/<YYYYMMDD>/<HH>.json` and `t/…`, so a push rewrites only today's short folder listing; the flat files were moved into folders on the first run (same bytes, nothing re-sent). One `d/<YYYY-MM-DD>.json` per finished **Eastern** day (23 or 25 h at DST), written once ~1:10 AM: its hour files with fingerprints, counts, weather, events and farm passes (enriched), and `first_hour` when the day starts late. `live.json` gains `days: [{date, hash}]`. Full `git gc` once a day (it rewrites every kept object); every other run only `git prune`.
+- **Pi (`publish.py`, `tracks.py`):** finished hours (already frozen since PR #34) are kept `KEEP_DAYS` = 30 local days instead of leaving with the 24 h window. They stay on disk and are **never read back into memory** (30 days ≈ 1.5 GB; the Pi has 2 GB). Files live in a folder per UTC day, `h/<YYYYMMDD>/<HH>.json` and `t/…`, so a push rewrites only today's short folder listing; the flat files were moved into folders on the first run (same bytes, nothing re-sent). One `d/<YYYY-MM-DD>.json` per finished **Eastern** day (23 or 25 h at DST), written once ~1:10 AM: its hour files with fingerprints, counts, weather, events and farm passes (enriched), and `first_hour` when the day starts late. If the weather fetch fails that night the file waits (up to `WX_RETRY_DAYS` = 3, then goes without), and a recent day on disk with no weather is built again — from 10-24, after `d/2026-10-21.json` went out with none. `live.json` gains `days: [{date, hash}]`. Full `git gc` once a day (it rewrites every kept object); every other run only `git prune`.
 - **Measured before merging** (local bare remote, same data, old code vs new, 30 days of archive in place): pushes 224,837 → 226,342, 332,369 → 333,876, 408,331 → 410,857 bytes (+0.5–0.7%, the days list and folder listings); the switch to folders cost 234 bytes on top of a normal push; days dropping off the end cost ~5–6 KB pushes. Confirm with vnstat on the Pi afterwards.
 - **Page:** the "Last 24 hours" label is a day picker. A day loads alone (its hour files fingerprint-checked), opens at its last recorded moment, headings read the date, "Now" returns to the rolling 24 h and frees the day. The Near-the-farm search works on the chosen day. `flights.html` gets it via `make_public.py`.
 - 30 days is my suggestion, not his decision; the Pi holds months. GitHub size ≈ 17 MB/day compressed, ~0.5 GB at 30 days: check Settings → repository size after the first week.

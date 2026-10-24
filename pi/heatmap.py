@@ -196,9 +196,10 @@ def wind_key(wind):
     return f"{int(round(float(wind) / 10.0)) % 36 * 10:03d}"
 
 
-def winds_by_hour(wx):
+def winds_by_hour(wx, distance=False):
     """{hour: 'calm' or degrees} from publish.fetch_weather() reports: for
-    each hour, the report nearest its middle, within an hour of it."""
+    each hour, the report nearest its middle, within an hour of it. With
+    `distance`, {hour: (seconds from the hour's middle, wind)}."""
     best = {}
     for w in wx or []:
         e = w.get("epoch")
@@ -209,7 +210,27 @@ def winds_by_hour(wx):
             if d <= 3600 and (hour not in best or d < best[hour][0]):
                 calm = w.get("compass") == "VRB" or not w.get("sknt")
                 best[hour] = (d, "calm" if calm else w.get("drct"))
+    if distance:
+        return {h: (d, v) for h, (d, v) in best.items() if v is not None}
     return {h: v for h, (d, v) in best.items() if v is not None}
+
+
+def take_winds(st, wx):
+    """Record the wind for each hour of these reports in the state. An hour
+    not yet in a grid takes the report nearest its middle seen so far
+    (`wind_d` keeps how near): until 2026-10-24 the first report seen was
+    kept (`setdefault`), and since the publisher runs every 15 minutes, the
+    :52 report of the hour BEFORE (38 min from the middle) was always seen
+    before the hour's own :52 report (22 min) and kept, so every hour went
+    into the wind grid of the hour before it. Hours already in a grid keep
+    the wind they were counted under."""
+    wind, wind_d = st.s["wind"], st.s["wind_d"]
+    for h, (d, v) in winds_by_hour(wx, distance=True).items():
+        k = str(h)
+        if h in st.done:
+            wind.setdefault(k, v)
+        elif k not in wind or d < wind_d.get(k, 3601):
+            wind[k], wind_d[k] = v, d
 
 
 def _chunk(kind, body):
@@ -316,7 +337,7 @@ class State:
                 elif os.path.exists(p):
                     os.remove(p)
             self.s = {"version": VERSION, "wind": winds, "wind_backfilled": bool(winds)}
-        for k, v in (("hours", []), ("aircraft_hours", 0), ("published", 0), ("wind", {}),
+        for k, v in (("hours", []), ("aircraft_hours", 0), ("published", 0), ("wind", {}), ("wind_d", {}),
                      ("hours_by_wind", {}), ("images", {}), ("dirty", []), ("no_wind_hours", 0)):
             self.s.setdefault(k, v)
         self.done = set(self.s["hours"])
@@ -341,8 +362,7 @@ def update(work_dir, db_hours, now, state_dir, db_start=None, wx=None, wx_fetch=
     Returns True if it wrote them."""
     st = State(state_dir)
     wind = st.s["wind"]
-    for h, v in winds_by_hour(wx).items():
-        wind.setdefault(str(h), v)
+    take_winds(st, wx)
     if db_start is None:
         st.save()
         return False
@@ -351,8 +371,7 @@ def update(work_dir, db_hours, now, state_dir, db_start=None, wx=None, wx_fetch=
     todo = [h for h in range(db_start - db_start % 3600, last + 1, 3600) if h not in st.done]
     if wx_fetch and todo and not st.s.get("wind_backfilled") and any(str(h) not in wind for h in todo):
         oldest = min(h for h in todo if str(h) not in wind)
-        for h, v in winds_by_hour(wx_fetch(min(168, math.ceil((now - oldest) / 3600) + 2))).items():
-            wind.setdefault(str(h), v)
+        take_winds(st, wx_fetch(min(168, math.ceil((now - oldest) / 3600) + 2)))
         st.s["wind_backfilled"] = True
     ready = []
     for h in todo:

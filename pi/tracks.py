@@ -110,6 +110,9 @@ def build(db_path, work_dir, start, end, type_for=None, final=frozenset(), settl
             continue
         if db is None:
             db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=60)
+            # the ORDER BY sorts through a temp b-tree: in memory, never a
+            # temp file on the SD card (an hour is ~300,000 rows)
+            db.execute("PRAGMA temp_store = MEMORY")
         body = hour_file(db, hour, type_for)
         if body["ac"]:
             files[name] = json.dumps(body, separators=(",", ":")).encode()
