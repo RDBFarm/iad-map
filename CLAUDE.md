@@ -8,15 +8,19 @@ than assuming.
 
 ---
 
-## 0. Start here — status as of 2026-10-18
+## 0. Start here — status as of 2026-10-24
 
 **Running on the Pi** (systemd): `iad-map-collector` (logs every aircraft heard,
 every 2 s), `iad-map-alerts` (emergency squawks, low passes, sightings → GitHub
 issue + text message), `iad-map-publish.timer` (every 15 min → `live-data`:
-the live map, 30 days of hours, both history heat maps), `iad-map-aircraft-db.timer`
+the live map, 30 days of hours, both history heat maps, the busy-times counts
+`busy.json` and the farm forecast's numbers and record `farm-model.json`), `iad-map-aircraft-db.timer`
 (monthly type lookup), `iad-map-netcheck.timer` (every 5 min, from 10-22: name
 lookups, diagnosis, self-renewal; see "Lookup outage"). Each upload carries the installed version in
-`live.json` `meta.pi_version` (from 10-18; written by the installer).
+`live.json` `meta.pi_version` (from 10-18; written by the installer). **Installed 10-23: 7ceb6ab**
+(busy times and the farm forecast with scoring); by 9:16 PM it had counted 27 whole days for
+`busy.json` and 679 hours for `farm-model.json` (`"ready": true`, every hour with a wind) and kept
+its first forecast (10-23 evening).
 
 **Pages** (GitHub Pages, from `main`): `live.html` (75 miles, under 15,000 ft;
 day picker for 30 days), `flights.html` (the same without the farm, built by
@@ -41,9 +45,13 @@ test); repo 363 MB compressed with the 30-day window.
 never measured (he declined self-reporting health for now, 10-18); close-
 approach thresholds (first guesses; he only sees jets ones); runway headings in
 the classifier (magnetic vs true); live map panels overlap at phone width
-(weather card over the altitude legend). Reminders already scheduled in the
-owner's session: 11-19 (UA 2853 on 11-21: wind, seat, the light at the farm;
-re-check the middle runway), 2027-01-15 (777-9 deliveries: drop `B779`).
+(weather card over the altitude legend). **Farm forecast, new 10-23:** the first scores
+(`score.by_lead` in `farm-model.json`) should appear from 10-24; the page shows a line once
+a lead has 4 scored blocks. The rule's choices (2 mi, 6,000 ft, blocks) are mine, not yet confirmed.
+**Scheduled tasks** (each starts its own session; moved off the 10-14–10-24 session
+when it was archived): 10-25 10 AM (are the scores coming in), 11-19 (UA 2853 on
+11-21: wind, seat, the light at the farm; re-check the middle runway), 2027-01-15
+(777-9 deliveries: drop `B779`).
 
 ### How to change something on the Pi
 All Pi code is in `pi/` on `main`. Merge the change, then have him run on
