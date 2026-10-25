@@ -1,0 +1,42 @@
+{
+ "title": "\ud83d\udc40 Air Force One (25-3300) coming into sight: closest in about 5 min, look SSW, about 25\u00b0 up, 7 mi away",
+ "body": "@RDBFarm \u2014 Air Force One (25-3300, Boeing VC-25B Bridge) is worth looking for from the farm (2026-10-25 16:41:00 UTC).\n\n- **At its closest** (in about 5 min): look SSW (bearing 213\u00b0), about 25\u00b0 above the horizon, 7.0 miles away, about 15,737 ft up\n- **Right now:** SE (bearing 138\u00b0), 27.8 miles away, about 6,313 ft above the farm's ground, heading NW, 295 kt\n- **Callsign:** AF1; ICAO AF83F3\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=af83f3) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=af83f3) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`, once per visit. Its path is projected straight ahead at its present course, speed and climb or descent; it alerts only when that path is in sight (within 12 miles, at least 5\u00b0 up) within 5 minutes for at least a minute. Those limits are estimates; a turn changes the path, and cloud isn't known._",
+ "event": {
+  "kind": "sighting",
+  "t": 1792946460,
+  "utc": "2026-10-25 16:41:00",
+  "hex": "af83f3",
+  "flight": "AF1",
+  "type": "B748",
+  "name": "Air Force One",
+  "reg": "25-3300",
+  "type_name": "Boeing VC-25B Bridge",
+  "watched_flight": null,
+  "slant_mi": 27.8,
+  "horiz_mi": 27.8,
+  "bearing": 138,
+  "elev_deg": 2,
+  "agl": 6313,
+  "alt": 5950,
+  "closest": {
+   "in_s": 285,
+   "slant_mi": 7.0,
+   "horiz_mi": 6.3,
+   "bearing": 213,
+   "elev_deg": 25,
+   "agl": 15737
+  },
+  "in_sight_s": [
+   185,
+   385
+  ],
+  "gs": 294.9,
+  "track": 305.2,
+  "lat": 38.849891,
+  "lon": -77.115723,
+  "limit_mi": 12,
+  "visibility_mi": 10.0,
+  "mlat": 1,
+  "pushed": true
+ }
+}
