@@ -1,0 +1,42 @@
+{
+ "title": "\ud83d\udc40 Doomsday plane (75-0125) coming into sight: closest in about 5 min, look SSW, about 12\u00b0 up, 10 mi away",
+ "body": "@RDBFarm \u2014 Doomsday plane (75-0125, E-4B Nightwatch) is worth looking for from the farm (2026-10-26 18:03:36 UTC).\n\n- **At its closest** (in about 5 min): look SSW (bearing 206\u00b0), about 12\u00b0 above the horizon, 10.3 miles away, about 11,581 ft up\n- **Right now:** SE (bearing 138\u00b0), 28.1 miles away, about 5,341 ft above the farm's ground, heading WNW, 252 kt\n- **Callsign:** CLUB22; ICAO ADFEB6\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=adfeb6) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=adfeb6) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`, once per visit. Its path is projected straight ahead at its present course, speed and climb or descent; it alerts only when that path is in sight (within 12 miles, at least 5\u00b0 up) within 5 minutes for at least a minute. Those limits are estimates; a turn changes the path, and cloud isn't known._",
+ "event": {
+  "kind": "sighting",
+  "t": 1793037816,
+  "utc": "2026-10-26 18:03:36",
+  "hex": "adfeb6",
+  "flight": "CLUB22",
+  "type": "B742",
+  "name": "Doomsday plane",
+  "reg": "75-0125",
+  "type_name": "E-4B Nightwatch",
+  "watched_flight": null,
+  "slant_mi": 28.1,
+  "horiz_mi": 28.1,
+  "bearing": 138,
+  "elev_deg": 2,
+  "agl": 5341,
+  "alt": 5250,
+  "closest": {
+   "in_s": 325,
+   "slant_mi": 10.3,
+   "horiz_mi": 10.1,
+   "bearing": 206,
+   "elev_deg": 12,
+   "agl": 11581
+  },
+  "in_sight_s": [
+   250,
+   400
+  ],
+  "gs": 252.2,
+  "track": 296.87,
+  "lat": 38.848727,
+  "lon": -77.108459,
+  "limit_mi": 12,
+  "visibility_mi": 10.0,
+  "mlat": 0,
+  "pushed": true
+ }
+}
