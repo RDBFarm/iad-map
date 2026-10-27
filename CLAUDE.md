@@ -18,9 +18,10 @@ days of each, the day files `d/`, both history heat maps, `busy.json`,
 `farm-model.json`), `iad-map-aircraft-db.timer` (monthly type lookup),
 `iad-map-netcheck.timer` (every 5 min, from 10-22: name lookups, diagnosis,
 self-renewal; "Lookup outage" below). `live.json` `meta.pi_version` says what is
-installed. **Installed 10-27 (first upload with it 12:33 PM EDT): 711add3** — busy
-times count the Dulles movements lost low down (#104, §4 Busy times); before it
-112f2bc (10-24, #88–#91; `PRAGMA auto_vacuum` on the real log printed `(2,)`).
+installed. **Installed 10-27 ~1 PM EDT: 9470b59** — altitudes below −500 ft are
+unknown (#105, §3 Data gotchas); 711add3 that morning (first upload 12:33 PM:
+busy times count the Dulles movements lost low down, #104, §4 Busy times);
+before them 112f2bc (10-24, #88–#91; `PRAGMA auto_vacuum` on the real log printed `(2,)`).
 **Read the Pi's newest upload by commit, not `.../live-data/live.json`:**
 raw.githubusercontent served the 12:15 file until well after the 12:33 push;
 `api.github.com/repos/RDBFarm/iad-map/branches/live-data` gives the sha.
@@ -120,8 +121,8 @@ days of `t/` files); every number was measured, and each fix has a test.
   66 of 11,121 aircraft untyped (0.6%), corporate callsigns, not airlines.
 
 ### How to change something on the Pi
-All Pi code is in `pi/` on `main`. Merge the change, then have him run on
-the Pi (SSH from the Mac Terminal or Termius on the iPad, **on the farm
+All Pi code is in `pi/` on `main`. Merge the change, then — **only then, never
+before (§1, his rule 10-27)** — have him run on the Pi (SSH from the Mac Terminal or Termius on the iPad, **on the farm
 network**), as **two separate lines** — a one-line `curl … | sudo bash` lost
 its pipe when pasted from the iPad:
 
@@ -186,6 +187,7 @@ The Pi itself can't be reached from outside the farm.
 ## 1. Who you're working with
 
 - **Guillaume** (GitHub: `rdbfarm`) runs Red Devil Bison Farm in Poolesville, MD. Hobbyist Python, **not a developer, not terminal-savvy**.
+- **Never show the installer commands before the change is merged and ready to install** (his rule, 10-27: "do not give me instructions to do an installation until you are ready for me to do an installation. I ran it before you were finished"). Not "once it's merged, run…", not a preview: until the merge, say only that an installer run will be needed; once merged, give the two lines and say it's ready now.
 - Give **one command at a time**, say where to type it (Mac Terminal vs. SSH on the Pi), and ask him to paste the output back before moving on. Multi-line pastes into the shell have garbled before — prefer single-line commands (e.g. `echo '...' | sudo tee -a file` instead of opening an editor).
 - **Say which device a step needs.** He moves between a MacBook and an iPad, and is not always at the farm. Anything that reaches the Pi needs the farm network; on the iPad, SSH is via Termius. **(09-24)**
 - For destructive steps (formatting, deleting, overwriting), confirm the target first and explain what will happen.
