@@ -190,6 +190,9 @@ class Pages(unittest.TestCase):
         self.assertEqual(pg.get_attribute("#back", "href"), "live.html")
         self.assertIn("no whole days yet", pg.inner_text("#tbl"))
         self.assertIn("Needs a whole day", pg.inner_text("#fc-note"))
+        # the Pi's counts include the ones lost low down (version 2, 10-27); the explanation says so
+        self.assertFalse(pg.evaluate("document.getElementById('rule-recover').hidden"))
+        self.assertEqual(pg.evaluate("document.getElementById('rule-earlier').textContent"), "")
         pg.close()
 
     def test_busy_times_snapshot_until_the_pi_has_published(self):
@@ -199,6 +202,7 @@ class Pages(unittest.TestCase):
             self.assertIn("snapshot", pg.inner_text("#status"))
             self.assertIn("27 whole days", pg.inner_text("#status"))
             self.assertIn("on", pg.get_attribute("[data-kind=a]", "class").split(), "opens on Landings")
+            self.assertTrue(pg.evaluate("document.getElementById('rule-recover').hidden"), "the snapshot is the first rule's")
             first = pg.inner_text("#tbl tr")
             self.assertIn("Every day", first)
             self.assertIn("3:30\u20134:30p", first)
