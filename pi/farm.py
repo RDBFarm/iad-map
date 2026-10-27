@@ -29,6 +29,7 @@ marked, so the log keeps everything.
 import json, math, os, sqlite3, time
 
 import aircraft_lookup
+import tracks
 
 FARM = (39.1506, -77.4612)   # centre of the parcel polygon
 FARM_RADIUS_NM = 1.0         # kept for old log lines and the alert wording
@@ -203,9 +204,10 @@ def update(db_path, events_dir, now=None, altim_at=None):
                 SELECT pos_t, hex, lat, lon, alt_baro, gs, track, flight, type, mlat FROM positions
                 WHERE t BETWEEN ? AND ? AND pos_t >= ? AND pos_t < ?
                   AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
-                  AND on_ground = 0 AND alt_baro IS NOT NULL
+                  AND on_ground = 0 AND alt_baro >= ?
                 ORDER BY pos_t""",
-                (a - 5, b + 30, a, b, min(lats) - pad, max(lats) + pad, min(lons) - pad, max(lons) + pad)):
+                (a - 5, b + 30, a, b, min(lats) - pad, max(lats) + pad, min(lons) - pad, max(lons) + pad,
+                 tracks.MIN_ALT_FT)):
             prev = state["prev"].get(hexid)
             state["prev"][hexid] = [t, lat, lon, alt]
             if prev and (t - prev[0] > PREV_MAX_S or t <= prev[0]):

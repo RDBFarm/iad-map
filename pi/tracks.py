@@ -19,6 +19,12 @@ push only carries the current hour's.
 """
 import json, os, re, sqlite3, time
 
+# Below this a reported altitude is a garbled reading, not a height: on 10-26/27
+# 51 of 773,227 live-map positions read -1,000 or -800 ft (a T-38 at 460 kt
+# among them), while real ones near the ground reach -125 ft at the lowest.
+# Every reader treats them as unknown; the log keeps what was received.
+MIN_ALT_FT = -500
+
 KEEP_EVERY_S = 60
 TURN_DEG = 3
 CLIMB_FT = 200
@@ -84,6 +90,8 @@ def hour_file(db, hour_start, type_for=None):
             r["flight"] = flight
         if actype:
             r["type"] = actype
+        if not ground and alt is not None and alt < MIN_ALT_FT:
+            alt = None                       # a garbled altitude: the position stays, the height is unknown
         r["pts"].append([t, round(lat, 5), round(lon, 5), 0 if ground else alt, track])
     ac = {}
     for hexid in sorted(rows):

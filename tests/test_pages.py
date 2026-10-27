@@ -69,8 +69,10 @@ class Pages(unittest.TestCase):
         cls.site.shutdown()
         cls.data.shutdown()
 
-    def open(self, page_name, width=1280, height=800, hash_="", data=None, fulfil=None, abort=()):
+    def open(self, page_name, width=1280, height=800, hash_="", data=None, fulfil=None, abort=(), clock=None):
         pg = self.browser.new_page(viewport={"width": width, "height": height})
+        if clock is not None:                  # the page's Date.now(), in epoch seconds; timers still run
+            pg.clock.set_fixed_time(clock)
         errors = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
         dist = os.environ.get("LEAFLET_DIST")
@@ -399,6 +401,18 @@ class Pages(unittest.TestCase):
         self.assertEqual(bool(chip), partial, chip)
         if partial:
             self.assertRegex(chip, r"^from \d+[ap]$")
+        # and only that one: a block cut short at the end (the last day, an hour short in the week the
+        # clocks go back, 10-27) starts on time and says nothing
+        self.assertEqual(pg.evaluate("document.querySelectorAll('#fc-blocks .chip small').length"), int(partial))
+        pg.close()
+        # the same in the week the clocks go back, whenever the test runs: Monday 2026-10-26
+        start = int(datetime.datetime(2026, 10, 26, tzinfo=tz).timestamp())
+        times = [start + 3600 * i for i in range(7 * 24)]
+        om = json.dumps({"hourly": {"time": times, "wind_speed_10m": [10] * len(times), "wind_direction_10m": [180] * len(times)}})
+        pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/", fulfil={"api.open-meteo.com": om},
+                               clock=start + 9 * 3600 + 1800)    # 9:30 AM that Monday
+        self.assertEqual(pg.evaluate("[...document.querySelectorAll('#fc-blocks .chip small')].map(e => e.textContent)"),
+                         ["from 9a"], "today's morning block only, not Sunday's evening (the 25-hour day leaves the last day an hour short)")
         self.assertEqual(pg.get_attribute("[data-kind=a]", "aria-pressed"), "true")
         self.assertEqual(errors, [])
         pg.close()

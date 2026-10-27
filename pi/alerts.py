@@ -77,6 +77,7 @@ from zoneinfo import ZoneInfo
 
 import aircraft_lookup
 import farm
+import tracks
 
 AIRCRAFT_JSON = os.environ.get("IADMAP_AIRCRAFT_JSON", "/run/readsb/aircraft.json")
 RECEIVER_JSON = os.environ.get("IADMAP_RECEIVER_JSON", "/run/readsb/receiver.json")
@@ -609,6 +610,8 @@ def watch():
         for ac in data.get("aircraft", []):
             if ac.get("seen", 99) > 10:
                 continue
+            if isinstance(ac.get("alt_baro"), (int, float)) and ac["alt_baro"] < tracks.MIN_ALT_FT:
+                ac["alt_baro"] = None          # a garbled altitude (-1,000 ft at 460 kt): unknown, not low
             h = ac.get("hex")
             prev = last_pos.get(h)
             if prev and not (0 < now - prev[0] <= farm.PREV_MAX_S):

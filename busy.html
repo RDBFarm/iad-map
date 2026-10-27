@@ -462,7 +462,9 @@ const hourSpan = h => `${h % 12 || 12}${h < 12 ? 'a' : 'p'}–${(h + 1) % 12 || 
 function drawFcBlocks() {
   const sums = FCDAYS.map(d => BLOCKS.map(([a, b]) => {
     const hs = d.hours.slice(a, b).filter(Boolean);
-    return hs.length ? {exp: hs.reduce((s, x) => s + x.exp, 0), from: hs.length < b - a ? hs[0].t : null} : null;
+    // "from" only when the block's first hour is gone (already over); a block cut short at the
+    // end -- the forecast's last day, an hour short in the week the clocks go back -- starts on time
+    return hs.length ? {exp: hs.reduce((s, x) => s + x.exp, 0), from: d.hours[a] ? null : hs[0].t} : null;
   }));
   const top = Math.max(1, ...sums.flat().filter(Boolean).map(x => x.exp));
   const tb = document.getElementById('fc-blocks'); tb.innerHTML = '';

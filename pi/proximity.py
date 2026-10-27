@@ -37,6 +37,7 @@ pair was found.
 import json, math, os, sqlite3, time
 
 import aircraft_lookup
+import tracks
 
 TAU_S = 10
 MIN_NM = 0.15
@@ -76,8 +77,8 @@ def load(db, a, b):
             SELECT pos_t, hex, lat, lon, alt_baro, gs, track, flight, type, mlat, acas_ra
             FROM positions
             WHERE t BETWEEN ? AND ? AND pos_t >= ? AND pos_t < ?
-              AND lat IS NOT NULL AND on_ground = 0 AND alt_baro IS NOT NULL
-              AND gs >= ?""", (a - 5, b + 30, a, b, MIN_GS)):
+              AND lat IS NOT NULL AND on_ground = 0 AND alt_baro >= ?
+              AND gs >= ?""", (a - 5, b + 30, a, b, tracks.MIN_ALT_FT, MIN_GS)):
         if (hexid, t) in seen:
             continue
         seen.add((hexid, t))
