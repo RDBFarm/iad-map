@@ -203,17 +203,16 @@ class Pages(unittest.TestCase):
             self.assertIn("Every day", first)
             self.assertIn("3:30\u20134:30p", first)
             # the table's headers say what each figure counts ("In it", "Per day", "Days": owner, 10-27)
-            head = pg.inner_text("#tbl-head")
-            self.assertEqual(head.count("landings"), 3, head)
-            self.assertIn("All day", head)
-            self.assertNotIn("In it", head)
+            # in his order: "Day, Arrivals, Busiest Hour, Arrivals, Busiest 15 minutes, Arrivals"
+            head = [c.strip() for c in pg.inner_text("#tbl-head").split("\t")]
+            self.assertEqual(head, ["Day", "Landings", "Busiest hour", "Landings", "Busiest 15 minutes, from", "Landings"])
             self.assertIn("each weekday over its own", pg.inner_text("#tbl-note"))
             fits = "(w => w.scrollWidth <= w.clientWidth)(document.getElementById('tbl').closest('.tablewrap'))"
             for kind in ("d", "ad", "a"):
                 pg.click(f"[data-kind={kind}]")
                 self.assertTrue(pg.evaluate(fits), f"the table fits at {width}px ({kind})")
                 if kind == "d":
-                    self.assertEqual(pg.inner_text("#tbl-head").count("take-offs"), 3)
+                    self.assertEqual(pg.inner_text("#tbl-head").count("Take-offs"), 3)
             self.assertLessEqual(pg.evaluate("document.documentElement.scrollWidth"), width)
             # tapping a bar, then a time on Wednesday's row, gives its figures under both charts
             bw = pg.evaluate("document.getElementById('bars').clientWidth")

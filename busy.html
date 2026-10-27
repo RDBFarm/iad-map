@@ -39,8 +39,7 @@
   th { color:#99a; font-weight:600; }
   td.num { text-align:right; font-variant-numeric:tabular-nums; }
   th.num { text-align:right; }
-  thead tr + tr th { white-space:normal; font-weight:400; font-size:0.85em; }
-  th.grp { text-align:left; border-bottom:1px solid rgba(255,255,255,0.15); }
+  #tbl-head th { white-space:normal; vertical-align:bottom; }
   tr.sel td { background:rgba(253,231,37,0.08); }
   tbody tr { cursor:pointer; }
   #about { position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,0.55); display:flex; align-items:center;
@@ -69,8 +68,10 @@
     th, td { padding:5px 4px; font-size:0.72rem; }
     .days { display:none; }       /* the count of days is in the chart's note */
     table.fc th, table.fc td { padding:3px 2px; }
-    #tbl td, #tbl-head th { padding:5px 3px; }   /* the busiest-times table fits 390 px */
-    #tbl-head tr + tr th { font-size:0.68rem; }
+    #tbl td, #tbl-head th { padding:5px 2px; }
+    #tbl td:first-child, #tbl-head th:first-child { padding-left:0; }   /* the busiest-times table fits 390 px */
+    #tbl-head th, #tbl td { font-size:0.7rem; }   /* the 11 px floor (10-24) */
+    #tbl td:nth-child(3), #tbl td:nth-child(5), #tbl-head th:nth-child(3), #tbl-head th:nth-child(5) { padding-left:5px; }   /* a gap after each count */
   }
 </style>
 </head>
@@ -283,16 +284,15 @@ function drawBars() {
     : 'No whole days of this weekday in the period yet.';
 }
 const what = () => KIND === 'ad' ? 'landings and take-offs' : KIND === 'a' ? 'landings' : 'take-offs';
-// What each figure counts, in the header itself ("In it", "Per day" and "Days" didn't say; owner, 10-27)
+// What each figure counts, in the header itself ("In it", "Per day" and "Days" didn't say; owner, 10-27),
+// in his order: "Day, Arrivals, Busiest Hour, Arrivals, Busiest 15 minutes, Arrivals"
 function drawTableHead() {
-  const w = what().replace('landings and take-offs', 'landings + take-offs');
-  document.getElementById('tbl-head').innerHTML =
-    '<tr><th rowspan="2">Day</th><th colspan="2" class="grp">Busiest hour</th><th colspan="2" class="grp">Busiest 15 min</th>' +
-    '<th class="num">All day</th><th rowspan="2" class="num days">Days averaged</th></tr>' +
-    `<tr><th>time</th><th class="num">${w}</th><th>starting</th><th class="num">${w}</th><th class="num">${w}</th></tr>`;
+  const w = {a: 'Landings', d: 'Take-offs', ad: 'Landings + take-offs'}[KIND];
+  document.getElementById('tbl-head').innerHTML = `<tr><th>Day</th><th class="num">${w}</th><th>Busiest hour</th>` +
+    `<th class="num">${w}</th><th>Busiest 15 minutes, from</th><th class="num">${w}</th></tr>`;
   const n = STATS[0].n, wk = STATS.slice(1).map(s => s.n), lo = Math.min(...wk), hi = Math.max(...wk);
   document.getElementById('tbl-note').textContent = n
-    ? `Averages: "Every day" over ${n} whole days; each weekday over its own ` +
+    ? `Averages per day: "Every day" over ${n} whole days; each weekday over its own ` +
       `${lo === hi ? lo : lo + '–' + hi} days. With so few of each weekday the busiest 15 minutes can swing; the busiest hour is steadier.`
     : '';
 }
@@ -304,10 +304,10 @@ function drawTable() {
   STATS.forEach((s, i) => {
     const tr = document.createElement('tr');
     if (i === SEL) tr.className = 'sel';
-    tr.innerHTML = s.n ? `<td>${s.label}</td><td>${short(span(s.hourStart))}</td>` +
-      `<td class="num">${s.hourVal.toFixed(0)}</td><td>${short(quarter(s.bestQ))}</td><td class="num">${s.v[s.bestQ].toFixed(0)}</td>` +
-      `<td class="num">${Math.round(s.perDay)}</td><td class="num days">${s.n}</td>`
-      : `<td>${s.label}</td><td colspan="6" class="note">no whole days yet</td>`;
+    tr.innerHTML = s.n ? `<td>${s.label}</td><td class="num">${Math.round(s.perDay)}</td>` +
+      `<td>${short(span(s.hourStart))}</td><td class="num">${s.hourVal.toFixed(0)}</td>` +
+      `<td>${short(quarter(s.bestQ))}</td><td class="num">${s.v[s.bestQ].toFixed(0)}</td>`
+      : `<td>${s.label}</td><td colspan="5" class="note">no whole days yet</td>`;
     tr.onclick = () => select(i);
     tb.appendChild(tr);
   });
