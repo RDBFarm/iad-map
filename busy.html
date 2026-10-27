@@ -157,15 +157,19 @@
       path that comes down below 1,500 ft within 5 nautical miles of the airport after being at 2,500 ft or higher in the
       20 minutes before; a <b>take-off</b> is one below 1,500 ft there that climbs to 2,500 ft within 15 minutes. Each is
       counted in the quarter-hour it happens, Eastern time.</p>
+    <p id="rule-recover" hidden><b>Lost low down.</b> The receiver loses some landings before they get below 1,500 ft, and
+      hears some take-offs only once they're above it. A path last heard descending below 5,000 ft within 12 nautical
+      miles, lined up with a Dulles runway and heading in, counts as a landing; one first heard there climbing away, as a
+      take-off. Planes landing at Leesburg or Manassas are left out.<span id="rule-earlier"></span></p>
     <p><b>Averages.</b> Each day of the week is the average of the days of that weekday in the period; "Every day" is the
       average of all of them. Only whole days are used.</p>
     <p class="farm"><b>The farm forecast.</b> <span id="fc-about">Counts planes passing within 2 miles of the farm below
       6,000 ft.</span></p>
     <p><b>How good is it?</b> About 450 landings and 440 take-offs a day were found in the first four weeks, 91% with airline
       callsigns. <b>Checked against the FAA's own count</b> (its daily tower operations, ATADS, every landing and take-off) for
-      Sept 26–30, the days both cover: this page found 4,530 of the FAA's 4,839, <b>94%</b> (91.7–97.0% a day). The missing
-      ones are mostly aircraft the receiver doesn't hear low near Dulles. The FAA count doesn't split landings from
-      take-offs or give times of day, so those are checked only in total.</p>
+      Sept 26–30, the days both cover: the 1,500 ft rule found 4,530 of the FAA's 4,839, <b>94%</b> (91.7–97.0% a day);
+      with the lost ones above added, 4,617, <b>95%</b>. The rest are aircraft the receiver never hears low near Dulles.
+      The FAA count doesn't split landings from take-offs or give times of day, so those are checked only in total.</p>
     <p><b>Kept up to date</b> by the Pi, which counts each hour once it's over.</p>
   </div>
 </div>
@@ -391,6 +395,14 @@ async function load() {
   status.textContent = (seed ? 'A snapshot of the first four weeks; the Pi keeps this up to date after its next update. '
                              : 'Counted by the farm\'s receiver, updated as each hour ends. ') +
     `${n} whole day${n === 1 ? '' : 's'} recorded.`;
+  // from version 2 the Pi also counts the ones lost low down (pi/busy.py, owner 10-27: "Include them")
+  if (DATA.version >= 2) {
+    document.getElementById('rule-recover').hidden = false;
+    const old = (DATA.earlier_rule_days || []).filter(d => DATA.complete_days.includes(d));
+    if (old.length) document.getElementById('rule-earlier').textContent =
+      ` ${old.length === 1 ? fmtDay(old[0]) + ' was' : fmtDay(old[0]) + ' – ' + fmtDay(old[old.length - 1]) + ' were'}` +
+      ' counted before this was added, so ' + (old.length === 1 ? 'it misses' : 'they miss') + ' them (about 2% fewer).';
+  }
   render();
   if (!PUBLIC) loadForecast();
 }
