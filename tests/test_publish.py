@@ -35,6 +35,21 @@ class Publish(unittest.TestCase):
         mapped = {r[1] for r in pts if r[4] <= P.MAX_ALT_FT}
         self.assertTrue({h for h in mapped if h.startswith("a1")}, "arrivals are on the map")
 
+    def test_a_garbled_altitude_is_unknown_not_low(self):
+        # BP02 (10-26): a T-38 at 28,000 ft read -1,000 ft for a few seconds and showed on
+        # the live map as a "military fighter"; below tracks.MIN_ALT_FT the height is unknown
+        in_files = lambda prefix: any(b"ae63f3" in b for n, b in self.files.items() if n.startswith(prefix))
+        self.assertFalse(in_files("h/"), "not on the live map")
+        self.assertFalse(in_files("o/"), "nor among the take-offs")
+        self.assertFalse([r for r in P.load_points(F.T0, F.T0 + F.HOURS * 3600) if r[1] == "ae63f3"])
+        self.assertFalse([p for h in range(F.T0, F.T0 + F.HOURS * 3600, 3600) for p in P.heat_points_for_hour(h)
+                          if p[1] == "ae63f3"], "nor the history heat map")
+        track = [json.loads(b)["ac"].get("ae63f3") for n, b in self.files.items() if n.startswith("t/")]
+        pts = [p for t in track if t for p in t[2]]
+        self.assertTrue(pts, "its whole path is still recorded")
+        self.assertTrue(all(p[3] is None or p[3] >= 28000 for p in pts), "with the garbled stretch's height unknown")
+        self.assertIn(None, [p[3] for p in pts])
+
     def test_a_settled_hour_is_read_back_unchanged(self):
         P.write_files(self.files)
         index2, files2, _ = P.build(F.NOW + 900, final=self.final)

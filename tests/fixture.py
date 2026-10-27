@@ -10,6 +10,9 @@ Three hours at the collector's 2 s cadence, built from straight legs:
     miles, outside the history map's 50)
   - a jet crossing 150 miles north at 35,000 ft (the wide map only)
   - a ground vehicle at Dulles (shown nowhere)
+  - a T-38 at 28,000 ft 40 miles west whose altitude reads -1,000 ft for 20 s
+    (BP02 on 10-26: a garbled reading put it on the live map as a "fighter";
+    tracks.MIN_ALT_FT keeps it off everything under 15,000 ft)
 """
 import math, os, sqlite3, sys, tempfile
 
@@ -90,6 +93,14 @@ def make_db(path=DB):
     for k in range(HOURS * 2):                     # every 30 minutes
         rows += leg_rows(f"a5{k:04x}", f"JBU{400 + k}", "A320", T0 + k * 1800, [
             (41.0, -79.5, 35000, 0), (41.0, -76.0, 35000, 1800)])
+    garbled = (IAD[0] - 0.1, IAD[1] - 0.8)        # ~40 statute miles west of Dulles
+    rows += leg_rows("ae63f3", "BP02", "T38", T0 + 1200, [
+        (garbled[0] - 0.3, garbled[1] + 0.3, 28000, 0), (garbled[0], garbled[1], 28000, 150)], category="A6")
+    rows += leg_rows("ae63f3", "BP02", "T38", T0 + 1350, [
+        (garbled[0], garbled[1], -1000, 0), (garbled[0] + 0.04, garbled[1] - 0.04, -1000, 20)], category="A6")
+    rows += leg_rows("ae63f3", "BP02", "T38", T0 + 1370, [
+        (garbled[0] + 0.04, garbled[1] - 0.04, 28000, 0), (garbled[0] + 0.3, garbled[1] - 0.3, 28000, 150)],
+        category="A6")
     db.executemany(f"INSERT INTO positions ({','.join(collector.COLUMNS)}) "
                    f"VALUES ({','.join('?' * len(collector.COLUMNS))})", rows)
     db.commit()

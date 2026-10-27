@@ -386,10 +386,10 @@ def load_points(start, end, radius_nm=RADIUS_NM):
         FROM positions
         WHERE t BETWEEN ? AND ? AND pos_t BETWEEN ? AND ?
           AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
-          AND (on_ground = 1 OR alt_baro <= ?)""",
+          AND (on_ground = 1 OR alt_baro BETWEEN ? AND ?)""",
         (start, end + 60, start, end,
          CENTER[0] - lat_pad, CENTER[0] + lat_pad, CENTER[1] - lon_pad, CENTER[1] + lon_pad,
-         MAX_ALT_FT))
+         tracks.MIN_ALT_FT, MAX_ALT_FT))
     rows, seen = [], set()
     for t, hexid, lat, lon, alt, gs, track, vrate, flight, actype, mlat, category in cur:
         key = (hexid, t)
@@ -948,9 +948,9 @@ def wide_points_for_hour(hour):
             SELECT pos_t, hex, lat, lon, type, category FROM positions
             WHERE t BETWEEN ? AND ? AND pos_t >= ? AND pos_t < ?
               AND lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
-              AND on_ground = 0 AND alt_baro IS NOT NULL
+              AND on_ground = 0 AND alt_baro >= ?
             ORDER BY hex, pos_t""",
-            (hour, hour + 3660, hour, hour + 3600, a.lat_min, a.lat_max, a.lon_min, a.lon_max))
+            (hour, hour + 3660, hour, hour + 3600, a.lat_min, a.lat_max, a.lon_min, a.lon_max, tracks.MIN_ALT_FT))
         last = None
         for t, hexid, lat, lon, actype, category in cur:
             t = int(t)

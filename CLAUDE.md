@@ -18,8 +18,12 @@ days of each, the day files `d/`, both history heat maps, `busy.json`,
 `farm-model.json`), `iad-map-aircraft-db.timer` (monthly type lookup),
 `iad-map-netcheck.timer` (every 5 min, from 10-22: name lookups, diagnosis,
 self-renewal; "Lookup outage" below). `live.json` `meta.pi_version` says what is
-installed. **Installed 10-24 (~12:30 PM EDT): 112f2bc** — everything merged that
-day (#88–#91 below); `PRAGMA auto_vacuum` on the real log printed `(2,)`.
+installed. **Installed 10-27 (first upload with it 12:33 PM EDT): 711add3** — busy
+times count the Dulles movements lost low down (#104, §4 Busy times); before it
+112f2bc (10-24, #88–#91; `PRAGMA auto_vacuum` on the real log printed `(2,)`).
+**Read the Pi's newest upload by commit, not `.../live-data/live.json`:**
+raw.githubusercontent served the 12:15 file until well after the 12:33 push;
+`api.github.com/repos/RDBFarm/iad-map/branches/live-data` gives the sha.
 
 **Pages** (GitHub Pages, from `main`): `live.html` (75 miles, under 15,000 ft;
 day picker for 30 days; Arrivals / Take-offs / Both from 10-24), `flights.html`
@@ -30,7 +34,7 @@ Dulles per 15 minutes by weekday, with the 7-day farm forecast; `busy.html?publi
 from `flights.html`). Every header carries Live map / History / Busy times
 (10-24, his request). Page changes need nothing on the Pi.
 
-**Tests:** `python3 -m unittest discover -s tests -v` (73 tests, ~2 min; the
+**Tests:** `python3 -m unittest discover -s tests -v` (76 tests, ~2 min; the
 page tests need Playwright: locally `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium`,
 and `LEAFLET_DIST=<leaflet dist folder>` when there is no network). They run on
 every PR and push (`.github/workflows/tests.yml`). `tests/fixture.py` is a
@@ -159,6 +163,14 @@ The Pi itself can't be reached from outside the farm.
 - **Backup name servers, set by hand 10-22** (his "happy to add whatever it takes"): `sudo nmcli connection modify "Wired connection 1" ipv4.ignore-auto-dns yes ipv4.dns "192.168.1.1 1.1.1.1 8.8.8.8" && sudo nmcli device reapply eth0`. NetworkManager then showed IP4.DNS 192.168.1.1, 1.1.1.1, 8.8.8.8 (router first, so local names still resolve). Undo: `sudo nmcli connection modify "Wired connection 1" ipv4.ignore-auto-dns no ipv4.dns "" && sudo nmcli device reapply eth0`. Not in the installer (it edits the farm's network profile; done once by hand).
 - **`pi/netcheck.py`** (root, `iad-map-netcheck.timer`, every 5 min): looks up github.com; when that fails, records to `events/netcheck.jsonl` whether the router and 1.1.1.1 answer a ping, which name servers answer a question sent straight to them (each in resolv.conf, NetworkManager's list, 1.1.1.1), and the default routes; after 3 failures in a row (15 min) renews the connection (`nmcli connection up`), at most hourly, and records whether lookups came back; records the recovery with its length. Read on the Pi: `python3 /opt/iad-map/netcheck.py --status`. The point: the next outage explains itself without anyone logging in.
 
+### The week the clocks go back (found 10-27)
+- `busy.html`'s forecast blocks said "from 6p" on a block cut short at the *end*: with the 25-hour Sunday (Nov 1) inside the 7 days, the last day is an hour short. "from" now means the block's first hour is gone (`drawFcBlocks`). Found because `test_busy_times_labels_midnight_and_partial_blocks` went red on main that week; it now also runs at a fixed clock in that week (`open(..., clock=)` → Playwright `page.clock.set_fixed_time`, seconds). **A test that reads today's date can fail only in clock-change weeks: pin the clock.**
+
+### The Pi restarts itself every Monday, 4–5 AM (found 10-27)
+- His Termius showed "Broadcast message from root@adsbexchange (Mon 2026-10-26 04:39:36 EDT): The system will reboot now!". Cause: `/etc/cron.d/weekly_reboot`, part of the ADS-B Exchange image (not ours; nothing in `pi/` reboots): `00 4 * * 1 root /bin/bash -c 'sleep $(( RANDOM \% 3600 )); /sbin/reboot;'`. Left as it is (my suggestion; it also clears anything stuck).
+- Cost on 10-26: the `t/` file's longest silence was 17 s (4:39:53–4:40:10 AM). The Pi has no clock battery, so after a restart it resumes at the time it shut down until it gets the time from the network; the real gap was probably a minute or two and the first positions after carry times up to that much early.
+- **The Pi keeps no logs across a restart:** `journalctl -b -1` says "no persistent journal was found", and `last -x` begins at the latest boot (logs live in memory). Anything that has to be explained after a reboot must be written to `/mnt/flightdata` (as `netcheck.py` does).
+
 ### Things that cost time on 09-23/24
 - The deploy key was first added to **rdbf-app** instead of iad-map, giving
   "Permission … denied to deploy key". It lives on **iad-map** only; it must
@@ -258,6 +270,7 @@ receiver: 291 aircraft (271 with position), ~1,683 messages/sec.
 
 ### Data gotchas seen in live data
 - **Negative altitudes are real** (pressure altitude): e.g. UAL1873 at −125 ft. Any ground threshold must tolerate this.
+- **But −1,000 ft is garbage (found 10-27, his question):** the live map's legend showed "1 military fighter" he couldn't find. It was BP02, a T-38 at 20,000–30,000 ft 64–120 nm SW of Dulles (1:12–2:01 PM 10-26), above the map's ceiling, except 4 positions in 5 s reading −1,000 ft near Charlottesville, which put it on the map as four specks. In that 24 h: 51 of 773,227 live-map positions read below −300 ft (49 at −1,000, 2 at −800), from 4 aircraft (2 on the map only because of them); real low readings were −25 to −100 ft. **`tracks.MIN_ALT_FT` = −500** (his "yes, build it"): below it every reader treats the altitude as unknown — the map, take-offs and both heat maps (publish's queries), farm passes, close approaches, the `t/` files (position kept, height `null`), and `alerts.py` (so a garbled reading over the farm can't send a low-pass text). The log keeps what was received. Test: `test_a_garbled_altitude_is_unknown_not_low` (the fixture has a BP02).
 - **Mode S–only aircraft** (altitude, no position): ~20 of 291 in the first snapshot.
 - **readsb on this image does not fill the aircraft type (`t`)** — 0 of 258 aircraft on 2026-09-24. `pi/aircraft_lookup.py` looks types up by ICAO address in tar1090-db (`aircraft.csv.gz`, csv branch) kept as SQLite at `/mnt/flightdata/iad-map/aircraft.db`, refreshed monthly by `iad-map-aircraft-db.timer`. Checked against May 1, 2025: found 1,817 of the 1,825 aircraft ADSBx had typed, same type for 97%. Addresses starting `~` (TIS-B, radar-derived) have no airframe and stay unknown — so they are logged and shown, never pushed.
 
