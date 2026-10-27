@@ -201,7 +201,19 @@ class Pages(unittest.TestCase):
             self.assertIn("on", pg.get_attribute("[data-kind=a]", "class").split(), "opens on Landings")
             first = pg.inner_text("#tbl tr")
             self.assertIn("Every day", first)
-            self.assertIn("3:30\u20134:30 PM", first)
+            self.assertIn("3:30\u20134:30p", first)
+            # the table's headers say what each figure counts ("In it", "Per day", "Days": owner, 10-27)
+            head = pg.inner_text("#tbl-head")
+            self.assertEqual(head.count("landings"), 3, head)
+            self.assertIn("All day", head)
+            self.assertNotIn("In it", head)
+            self.assertIn("each weekday over its own", pg.inner_text("#tbl-note"))
+            fits = "(w => w.scrollWidth <= w.clientWidth)(document.getElementById('tbl').closest('.tablewrap'))"
+            for kind in ("d", "ad", "a"):
+                pg.click(f"[data-kind={kind}]")
+                self.assertTrue(pg.evaluate(fits), f"the table fits at {width}px ({kind})")
+                if kind == "d":
+                    self.assertEqual(pg.inner_text("#tbl-head").count("take-offs"), 3)
             self.assertLessEqual(pg.evaluate("document.documentElement.scrollWidth"), width)
             # tapping a bar, then a time on Wednesday's row, gives its figures under both charts
             bw = pg.evaluate("document.getElementById('bars').clientWidth")
@@ -442,7 +454,7 @@ class Pages(unittest.TestCase):
         self.assertIsNone(pg.query_selector("#fc-panel"))
         self.assertEqual(pg.evaluate("document.querySelectorAll('.farm').length"), 0)
         self.assertEqual(pg.get_attribute("#back", "href"), "flights.html")
-        self.assertIn("3:30\u20134:30 PM", pg.inner_text("#tbl tr"))
+        self.assertIn("3:30\u20134:30p", pg.inner_text("#tbl tr"))
         pg.close()
 
 
