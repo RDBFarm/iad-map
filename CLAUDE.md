@@ -120,8 +120,8 @@ days of `t/` files); every number was measured, and each fix has a test.
   66 of 11,121 aircraft untyped (0.6%), corporate callsigns, not airlines.
 
 ### How to change something on the Pi
-All Pi code is in `pi/` on `main`. Merge the change, then have him run on
-the Pi (SSH from the Mac Terminal or Termius on the iPad, **on the farm
+All Pi code is in `pi/` on `main`. Merge the change, then — **only then, never
+before (§1, his rule 10-27)** — have him run on the Pi (SSH from the Mac Terminal or Termius on the iPad, **on the farm
 network**), as **two separate lines** — a one-line `curl … | sudo bash` lost
 its pipe when pasted from the iPad:
 
@@ -186,6 +186,7 @@ The Pi itself can't be reached from outside the farm.
 ## 1. Who you're working with
 
 - **Guillaume** (GitHub: `rdbfarm`) runs Red Devil Bison Farm in Poolesville, MD. Hobbyist Python, **not a developer, not terminal-savvy**.
+- **Never show the installer commands before the change is merged and ready to install** (his rule, 10-27: "do not give me instructions to do an installation until you are ready for me to do an installation. I ran it before you were finished"). Not "once it's merged, run…", not a preview: until the merge, say only that an installer run will be needed; once merged, give the two lines and say it's ready now.
 - Give **one command at a time**, say where to type it (Mac Terminal vs. SSH on the Pi), and ask him to paste the output back before moving on. Multi-line pastes into the shell have garbled before — prefer single-line commands (e.g. `echo '...' | sudo tee -a file` instead of opening an editor).
 - **Say which device a step needs.** He moves between a MacBook and an iPad, and is not always at the farm. Anything that reaches the Pi needs the farm network; on the iPad, SSH is via Termius. **(09-24)**
 - For destructive steps (formatting, deleting, overwriting), confirm the target first and explain what will happen.
