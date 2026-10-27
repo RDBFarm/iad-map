@@ -18,9 +18,10 @@ days of each, the day files `d/`, both history heat maps, `busy.json`,
 `farm-model.json`), `iad-map-aircraft-db.timer` (monthly type lookup),
 `iad-map-netcheck.timer` (every 5 min, from 10-22: name lookups, diagnosis,
 self-renewal; "Lookup outage" below). `live.json` `meta.pi_version` says what is
-installed. **Installed 10-27 (first upload with it 12:33 PM EDT): 711add3** — busy
-times count the Dulles movements lost low down (#104, §4 Busy times); before it
-112f2bc (10-24, #88–#91; `PRAGMA auto_vacuum` on the real log printed `(2,)`).
+installed. **Installed 10-27 ~1 PM EDT: 9470b59** — altitudes below −500 ft are
+unknown (#105, §3 Data gotchas); 711add3 that morning (first upload 12:33 PM:
+busy times count the Dulles movements lost low down, #104, §4 Busy times);
+before them 112f2bc (10-24, #88–#91; `PRAGMA auto_vacuum` on the real log printed `(2,)`).
 **Read the Pi's newest upload by commit, not `.../live-data/live.json`:**
 raw.githubusercontent served the 12:15 file until well after the 12:33 push;
 `api.github.com/repos/RDBFarm/iad-map/branches/live-data` gives the sha.
