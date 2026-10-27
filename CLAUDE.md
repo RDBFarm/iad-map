@@ -18,8 +18,12 @@ days of each, the day files `d/`, both history heat maps, `busy.json`,
 `farm-model.json`), `iad-map-aircraft-db.timer` (monthly type lookup),
 `iad-map-netcheck.timer` (every 5 min, from 10-22: name lookups, diagnosis,
 self-renewal; "Lookup outage" below). `live.json` `meta.pi_version` says what is
-installed. **Installed 10-24 (~12:30 PM EDT): 112f2bc** — everything merged that
-day (#88–#91 below); `PRAGMA auto_vacuum` on the real log printed `(2,)`.
+installed. **Installed 10-27 (first upload with it 12:33 PM EDT): 711add3** — busy
+times count the Dulles movements lost low down (#104, §4 Busy times); before it
+112f2bc (10-24, #88–#91; `PRAGMA auto_vacuum` on the real log printed `(2,)`).
+**Read the Pi's newest upload by commit, not `.../live-data/live.json`:**
+raw.githubusercontent served the 12:15 file until well after the 12:33 push;
+`api.github.com/repos/RDBFarm/iad-map/branches/live-data` gives the sha.
 
 **Pages** (GitHub Pages, from `main`): `live.html` (75 miles, under 15,000 ft;
 day picker for 30 days; Arrivals / Take-offs / Both from 10-24), `flights.html`
@@ -158,6 +162,11 @@ The Pi itself can't be reached from outside the farm.
 - **NetworkManager logged nothing from 17:30 to 09:24:59**, then `dhcp4 (eth0): state changed new lease`, then at 09:26:27 `set 'Wired connection 1' (eth0) as default for IPv6 routing and DNS`; lookups worked from then (`getent hosts github.com` → 140.82.114.3; router and 1.1.1.1 ping fine). He restarted nothing. **Both outages ended within minutes of him logging in to the Pi** (10-21 ~3:10 PM, 10-22 ~9:20 AM); a clue, not a cause. Name servers before: `192.168.1.1` (the Fios router) and its IPv6 `2600:4040:27d7:ef00::1`, search `mynetworksettings.com`.
 - **Backup name servers, set by hand 10-22** (his "happy to add whatever it takes"): `sudo nmcli connection modify "Wired connection 1" ipv4.ignore-auto-dns yes ipv4.dns "192.168.1.1 1.1.1.1 8.8.8.8" && sudo nmcli device reapply eth0`. NetworkManager then showed IP4.DNS 192.168.1.1, 1.1.1.1, 8.8.8.8 (router first, so local names still resolve). Undo: `sudo nmcli connection modify "Wired connection 1" ipv4.ignore-auto-dns no ipv4.dns "" && sudo nmcli device reapply eth0`. Not in the installer (it edits the farm's network profile; done once by hand).
 - **`pi/netcheck.py`** (root, `iad-map-netcheck.timer`, every 5 min): looks up github.com; when that fails, records to `events/netcheck.jsonl` whether the router and 1.1.1.1 answer a ping, which name servers answer a question sent straight to them (each in resolv.conf, NetworkManager's list, 1.1.1.1), and the default routes; after 3 failures in a row (15 min) renews the connection (`nmcli connection up`), at most hourly, and records whether lookups came back; records the recovery with its length. Read on the Pi: `python3 /opt/iad-map/netcheck.py --status`. The point: the next outage explains itself without anyone logging in.
+
+### The Pi restarts itself every Monday, 4–5 AM (found 10-27)
+- His Termius showed "Broadcast message from root@adsbexchange (Mon 2026-10-26 04:39:36 EDT): The system will reboot now!". Cause: `/etc/cron.d/weekly_reboot`, part of the ADS-B Exchange image (not ours; nothing in `pi/` reboots): `00 4 * * 1 root /bin/bash -c 'sleep $(( RANDOM \% 3600 )); /sbin/reboot;'`. Left as it is (my suggestion; it also clears anything stuck).
+- Cost on 10-26: the `t/` file's longest silence was 17 s (4:39:53–4:40:10 AM). The Pi has no clock battery, so after a restart it resumes at the time it shut down until it gets the time from the network; the real gap was probably a minute or two and the first positions after carry times up to that much early.
+- **The Pi keeps no logs across a restart:** `journalctl -b -1` says "no persistent journal was found", and `last -x` begins at the latest boot (logs live in memory). Anything that has to be explained after a reboot must be written to `/mnt/flightdata` (as `netcheck.py` does).
 
 ### Things that cost time on 09-23/24
 - The deploy key was first added to **rdbf-app** instead of iad-map, giving
