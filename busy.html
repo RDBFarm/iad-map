@@ -53,6 +53,13 @@
   .tablewrap { overflow-x:auto; }
   .panel h3 { font-size:0.8rem; color:#dde; margin:12px 0 4px; }
   table.fc th { text-align:center; line-height:1.25; }
+  /* wider than a phone: equal columns, centred, so each count sits under its word, not a page away from its time
+     ("Looks uneven on my iPad", owner, 10-27) */
+  @media (min-width:641px) {
+    table.busiest { table-layout:fixed; }
+    table.busiest th, table.busiest td { text-align:center; }
+    table.busiest th:first-child, table.busiest td:first-child { text-align:left; }
+  }
   table.fc th small, table.fc td small { display:block; font-weight:400; color:#99a; font-size:0.7rem; }
   .chip small { color:inherit; opacity:0.85; }
   table.fc td { text-align:center; padding:3px; }
@@ -134,7 +141,7 @@
 
   <div class="panel">
     <h2>Busiest times</h2>
-    <div class="tablewrap"><table>
+    <div class="tablewrap"><table class="busiest">
       <thead id="tbl-head"></thead>
       <tbody id="tbl"></tbody>
     </table></div>

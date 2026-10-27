@@ -207,6 +207,9 @@ class Pages(unittest.TestCase):
             head = [c.strip() for c in pg.inner_text("#tbl-head").split("\t")]
             self.assertEqual(head, ["Day", "Landings", "Busiest hour", "Landings", "Busiest 15 minutes, from", "Landings"])
             self.assertIn("each weekday over its own", pg.inner_text("#tbl-note"))
+            if width > 640:   # equal columns, so a count isn't a page away from its time ("uneven on my iPad", 10-27)
+                cols = pg.evaluate("[...document.querySelectorAll('#tbl tr:first-child td')].map(t => t.getBoundingClientRect().width)")
+                self.assertLessEqual(max(cols) - min(cols), 1, cols)
             fits = "(w => w.scrollWidth <= w.clientWidth)(document.getElementById('tbl').closest('.tablewrap'))"
             for kind in ("d", "ad", "a"):
                 pg.click(f"[data-kind={kind}]")
