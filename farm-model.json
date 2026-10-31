@@ -1,0 +1,123 @@
+{
+ "version": 1,
+ "near_mi": 2.0,
+ "below_ft": 6000,
+ "axis_deg": 181,
+ "share": {
+  "S": 0.751,
+  "N": 0.022
+ },
+ "p_south": [
+  {
+   "from_kt": null,
+   "to_kt": 0,
+   "p": 0.04,
+   "hours": 379
+  },
+  {
+   "from_kt": 0,
+   "to_kt": 2,
+   "p": 0.28,
+   "hours": 237
+  },
+  {
+   "from_kt": 2,
+   "to_kt": 4,
+   "p": 0.73,
+   "hours": 56
+  },
+  {
+   "from_kt": 4,
+   "to_kt": null,
+   "p": 0.99,
+   "hours": 92
+  }
+ ],
+ "above_per_hour": {
+  "S": 7.3,
+  "N": 7.6
+ },
+ "hours": {
+  "counted": 859,
+  "south": 215,
+  "north": 550,
+  "mixed": 24,
+  "unclear": 70,
+  "with_wind": 858
+ },
+ "ready": true,
+ "first": "2026-09-25",
+ "last": "2026-10-31",
+ "check": {
+  "note": "the rule on the same weeks with the winds that blew, not forecasts",
+  "hourly_corr": 0.78,
+  "block_corr": 0.87,
+  "blocks": 141,
+  "quiet_blocks": {
+   "n": 70,
+   "median": 2.0,
+   "max": 118
+  },
+  "busy_blocks": {
+   "n": 29,
+   "median": 105,
+   "min": 2
+  }
+ },
+ "source": "pi/farmcast.py on the farm's receiver: its recorded paths and KIAD METARs",
+ "score": {
+  "days": 28,
+  "forecasts": 9,
+  "by_lead": [
+   {
+    "lead": 0,
+    "blocks": 22,
+    "median_err": 12.8,
+    "median_actual": 4.0,
+    "median_forecast": 22.1
+   },
+   {
+    "lead": 1,
+    "blocks": 29,
+    "median_err": 8.1,
+    "median_actual": 3,
+    "median_forecast": 19.3
+   },
+   {
+    "lead": 2,
+    "blocks": 25,
+    "median_err": 7.1,
+    "median_actual": 4,
+    "median_forecast": 9.1
+   },
+   {
+    "lead": 3,
+    "blocks": 21,
+    "median_err": 6.7,
+    "median_actual": 4,
+    "median_forecast": 8.9
+   },
+   {
+    "lead": 4,
+    "blocks": 17,
+    "median_err": 6.7,
+    "median_actual": 4,
+    "median_forecast": 10.1
+   },
+   {
+    "lead": 5,
+    "blocks": 13,
+    "median_err": 19.6,
+    "median_actual": 18,
+    "median_forecast": 18.3
+   },
+   {
+    "lead": 6,
+    "blocks": 9,
+    "median_err": 6.3,
+    "median_actual": 18,
+    "median_forecast": 8.9
+   }
+  ]
+ }
+}
