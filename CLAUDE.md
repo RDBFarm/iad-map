@@ -69,7 +69,9 @@ test); repo 363 MB compressed with the 30-day window.
   measure the live map's headline too (below).
 - **Scheduled tasks** (each starts its own session): 10-25 10 AM (are the
   scores coming in), 11-19 (UA 2853 on 11-21: wind, seat, the light at the
-  farm; re-check the middle runway), 2027-01-15 (777-9 deliveries: drop `B779`).
+  farm; re-check the middle runway), **11-20 10:17 AM EST (October's FAA counts
+  vs busy times, both rules; his "yes, schedule it", 11-04)**, 2027-01-15
+  (777-9 deliveries: drop `B779`).
 
 ### What changed on 10-24 (a review he asked for, then his decisions; PRs #88–#93)
 Three parallel reviews (the Pi programs, the pages, the rules run over 6 real
