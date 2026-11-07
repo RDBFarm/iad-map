@@ -1,0 +1,123 @@
+{
+ "version": 1,
+ "near_mi": 2.0,
+ "below_ft": 6000,
+ "axis_deg": 181,
+ "share": {
+  "S": 0.756,
+  "N": 0.022
+ },
+ "p_south": [
+  {
+   "from_kt": null,
+   "to_kt": 0,
+   "p": 0.04,
+   "hours": 401
+  },
+  {
+   "from_kt": 0,
+   "to_kt": 2,
+   "p": 0.3,
+   "hours": 271
+  },
+  {
+   "from_kt": 2,
+   "to_kt": 4,
+   "p": 0.73,
+   "hours": 83
+  },
+  {
+   "from_kt": 4,
+   "to_kt": null,
+   "p": 0.97,
+   "hours": 154
+  }
+ ],
+ "above_per_hour": {
+  "S": 7.0,
+  "N": 7.7
+ },
+ "hours": {
+  "counted": 1025,
+  "south": 307,
+  "north": 603,
+  "mixed": 29,
+  "unclear": 86,
+  "with_wind": 1024
+ },
+ "ready": true,
+ "first": "2026-09-25",
+ "last": "2026-11-07",
+ "check": {
+  "note": "the rule on the same weeks with the winds that blew, not forecasts",
+  "hourly_corr": 0.8,
+  "block_corr": 0.86,
+  "blocks": 167,
+  "quiet_blocks": {
+   "n": 71,
+   "median": 2,
+   "max": 118
+  },
+  "busy_blocks": {
+   "n": 47,
+   "median": 104,
+   "min": 2
+  }
+ },
+ "source": "pi/farmcast.py on the farm's receiver: its recorded paths and KIAD METARs",
+ "score": {
+  "days": 28,
+  "forecasts": 16,
+  "by_lead": [
+   {
+    "lead": 0,
+    "blocks": 43,
+    "median_err": 10.3,
+    "median_actual": 33,
+    "median_forecast": 39.3
+   },
+   {
+    "lead": 1,
+    "blocks": 56,
+    "median_err": 7.9,
+    "median_actual": 13.0,
+    "median_forecast": 22.5
+   },
+   {
+    "lead": 2,
+    "blocks": 52,
+    "median_err": 7.5,
+    "median_actual": 16.5,
+    "median_forecast": 17.6
+   },
+   {
+    "lead": 3,
+    "blocks": 48,
+    "median_err": 6.9,
+    "median_actual": 14.0,
+    "median_forecast": 19.6
+   },
+   {
+    "lead": 4,
+    "blocks": 44,
+    "median_err": 7.4,
+    "median_actual": 16.5,
+    "median_forecast": 21.2
+   },
+   {
+    "lead": 5,
+    "blocks": 40,
+    "median_err": 15.1,
+    "median_actual": 23.0,
+    "median_forecast": 39.0
+   },
+   {
+    "lead": 6,
+    "blocks": 30,
+    "median_err": 18.3,
+    "median_actual": 16.5,
+    "median_forecast": 23.1
+   }
+  ]
+ }
+}
