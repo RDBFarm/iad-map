@@ -302,6 +302,52 @@ class Pages(unittest.TestCase):
         self.assertIn("The Pi is counting its own numbers (3 of 336 hours so far)", pg.inner_text("#fc-record"))
         pg.close()
 
+    def test_farm_forecast_keeps_the_way_dulles_is_landing_now(self):
+        # 11-12: Dulles landed south from 10 AM in a west crosswind the wind rule read as 29% south. The Pi now
+        # publishes the way it is landing ("now"), and the next 12 hours keep it until the wind clearly turns.
+        with open(os.path.join(F.ROOT, "farm-model.json")) as f:
+            seed = json.load(f)
+        t = int(time.time())
+        hours = [t // 3600 * 3600 + 3600 * i for i in range(48)]
+        west = json.dumps({"hourly": {"time": hours, "wind_speed_10m": [5] * 48, "wind_direction_10m": [270] * 48}})
+        pi = dict(seed, ready=True, source="pi/farmcast.py",
+                  keep={"hours": 12, "to_south_kt": 4, "fresh_s": 7200},
+                  now={"flow": "S", "south": 24, "north": 0, "landings": 24, "at": t - 300})
+        pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/",
+                               fulfil={"farm-model.json?t=": json.dumps(pi), "api.open-meteo.com": west})
+        self.assertEqual(errors, [])
+        self.assertEqual(pg.inner_text("#fc-now"), "Dulles has been landing south (24 of the last hour's 24 landings), so the "
+                         "next 12 hours assume it carries on until the wind turns to the north.")
+        ps = pg.evaluate("FCDAYS.flatMap(d => d.hours.filter(Boolean).map(x => [x.t, x.p, x.kept]))")
+        self.assertTrue(all(p == 1 and k == "S" for h, p, k in ps if h < t - 300 + 12 * 3600), "kept: landing south")
+        low = seed["p_south"][1]["p"]
+        self.assertTrue(all(p == low and k is None for h, p, k in ps if h >= t - 300 + 12 * 3600), "then the wind rule")
+        self.assertIn("so landing south assumed", pg.evaluate("fcText(FCSEL, FCDAYS[FCSEL].hours.findIndex(Boolean))"))
+        # the page and the Pi's twin agree, "now" included
+        page = dict(pg.evaluate("FCDAYS.flatMap(d => d.hours.filter(Boolean).map(x => [x.t, x.exp]))"))
+        with open(os.path.join(F.ROOT, "busy-seed.json")) as g:
+            twin = C.predict(pi, json.load(g), json.loads(west), time.time())
+        both = [h for h in page if h in twin and C.local(h).hour != 1]
+        self.assertGreater(len(both), 40)
+        for h in both:
+            self.assertAlmostEqual(page[h], twin[h][2], places=9, msg=C.local(h).isoformat())
+        pg.close()
+        # changing over (mixed): nothing kept, and the page says why
+        pi["now"] = dict(pi["now"], flow="M", south=8, north=4)
+        pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/",
+                               fulfil={"farm-model.json?t=": json.dumps(pi), "api.open-meteo.com": west})
+        self.assertEqual(errors, [])
+        self.assertIn("changing the way it lands", pg.inner_text("#fc-now"))
+        self.assertFalse(pg.evaluate("FCDAYS.some(d => d.hours.some(x => x && x.kept))"))
+        pg.close()
+        # a "now" over two hours old (the Pi offline) is not used
+        pi["now"] = dict(pi["now"], flow="S", at=t - 3 * 3600)
+        pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/",
+                               fulfil={"farm-model.json?t=": json.dumps(pi), "api.open-meteo.com": west})
+        self.assertEqual((errors, pg.inner_text("#fc-now")), ([], ""))
+        self.assertFalse(pg.evaluate("FCDAYS.some(d => d.hours.some(x => x && x.kept))"))
+        pg.close()
+
     BOX = """s => { const e = document.querySelector(s); if (!e || e.hidden) return null;
         const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; }"""
 
