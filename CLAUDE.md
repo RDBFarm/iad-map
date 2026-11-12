@@ -18,7 +18,10 @@ days of each, the day files `d/`, both history heat maps, `busy.json`,
 `farm-model.json`), `iad-map-aircraft-db.timer` (monthly type lookup),
 `iad-map-netcheck.timer` (every 5 min, from 10-22: name lookups, diagnosis,
 self-renewal; "Lookup outage" below). `live.json` `meta.pi_version` says what is
-installed. **Installed 10-27 ~1 PM EDT: 9470b59** — altitudes below −500 ft are
+installed. **Installed 11-12 (first upload 12:30 PM EST): 5d56b9d** — the farm
+forecast keeps the way Dulles is landing, overnight too, with the 5 AM rule (#115,
+#116, §4 Farm forecast); its first `now`: south, 25 of 25 landings. Before it
+9470b59 (10-27 ~1 PM EDT) — altitudes below −500 ft are
 unknown (#105, §3 Data gotchas); 711add3 that morning (first upload 12:33 PM:
 busy times count the Dulles movements lost low down, #104, §4 Busy times);
 before them 112f2bc (10-24, #88–#91; `PRAGMA auto_vacuum` on the real log printed `(2,)`).
