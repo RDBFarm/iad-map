@@ -135,7 +135,38 @@ class FarmForecast(unittest.TestCase):
         with open(os.path.join(F.WORK, "farm-model.json")) as f:
             pub = json.load(f)
         self.assertEqual(pub["now"], now)
-        self.assertEqual(pub["keep"], {"hours": 12, "to_south_kt": 4, "fresh_s": 7200})
+        self.assertEqual(pub["keep"], {"hours": 12, "to_south_kt": 4, "fresh_s": 7200,
+                                       "quiet_h": 8, "restart_hour": 5, "look_h": 4})
+
+    def test_overnight_and_the_morning_restart(self):
+        # owner, 11-12: does Dulles turn as it ramps up at 5-6 AM for a wind change coming later?
+        # The last clear direction is carried through quiet hours; at 5 AM the wind ahead may set it.
+        st = {}
+        night = at(2026, 11, 12, 23)
+        self.assertEqual(C.carried({"flow": "S", "at": night}, st)["flow"], "S")
+        quiet = C.carried({"flow": None, "at": night + 3 * 3600}, st)
+        self.assertEqual((quiet["flow"], quiet["quiet"], quiet["seen"]), ("S", True, night))
+        self.assertIsNone(C.carried({"flow": None, "at": night + 9 * 3600}, st)["flow"], "beyond 8 hours: not carried")
+        self.assertEqual(C.carried({"flow": "M", "at": night + 3600}, st)["flow"], "M")
+        self.assertIsNone(C.carried({"flow": None, "at": night + 7200}, st)["flow"], "a changeover clears it")
+        m = {"axis_deg": C.AXIS_DEG, "share": {"S": 0.75, "N": 0.02},
+             "p_south": [{"from_kt": None, "to_kt": 0, "p": 0.04}, {"from_kt": 0, "to_kt": 2, "p": 0.29},
+                         {"from_kt": 2, "to_kt": 4, "p": 0.73}, {"from_kt": 4, "to_kt": None, "p": 0.95}],
+             "keep": {"hours": 12, "to_south_kt": 4, "fresh_s": 7200, "quiet_h": 8, "restart_hour": 5, "look_h": 4},
+             "now": {"flow": "S", "at": night + 1800}}
+        five = at(2026, 11, 13, 5)
+        west = lambda h: (270, 4)
+        north_at_8 = lambda h: (0, 5) if h >= five + 3 * 3600 else (270, 4)       # 11-11's case
+        north_at_10 = lambda h: (0, 5) if h >= five + 5 * 3600 else (270, 4)
+        now = night + 1800
+        self.assertEqual(C.kept(m, five - 3600, now, north_at_8), "S", "before 5 AM: the evening direction")
+        self.assertEqual(C.kept(m, five, now, north_at_8), "N", "from 5 AM: the way the wind will favour by 8")
+        self.assertEqual(C.p_south_at(m, five + 3600, 270, 4, now, north_at_8), 0.0)
+        self.assertEqual(C.kept(m, five, now, north_at_10), "S", "a change 5 hours out is beyond the 4 looked at")
+        self.assertEqual(C.kept(m, five, now, west), "S", "nothing clear ahead: the evening direction")
+        self.assertEqual(C.kept(m, five, now), "S", "no forecast winds given: no restart")
+        day = dict(m, now={"flow": "S", "at": at(2026, 11, 13, 14)})
+        self.assertEqual(C.kept(day, at(2026, 11, 13, 20), at(2026, 11, 13, 14), north_at_8), "S", "no 5 AM in the window")
 
     def test_numbers(self):
         records = {at(2026, 10, 20, i): ["S" if i < 10 else "N", 10, 8 if i < 10 else 0, 3] for i in range(20)}

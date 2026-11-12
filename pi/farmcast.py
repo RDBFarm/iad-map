@@ -39,6 +39,17 @@ that, the wind rule above. Measured over Oct 13 - Nov 12 with the winds that ble
 for the wind alone; at 24 h 82% against 85%, hence KEEP_H. This morning on 11-12
 Dulles turned to landing south at 10 AM in a 4-6 kt crosswind, which neither
 rule saw coming; this one follows it from the first hour it shows.
+
+Overnight (owner, 11-12: "wouldn't the flight paths change when they start to ramp
+up again at 5-6am in anticipation of that wind change?"): with too few landings to
+read a direction, the last clear one is carried for up to QUIET_H hours (the hours
+in between are quiet, not changing over); and at the first RESTART_HOUR after "now"
+the direction becomes the one the forecast wind clearly favours in the LOOK_H hours
+from it, if it favours one. Over the same 30 days, as computed here hour by hour,
+1-12 h ahead: 89.8% as first built, 90.2% with the carry-over, 90.6% with both
+(5-10 AM hours 87.8 / 89.4 / 90.1%). 26 of 30 nights kept the evening direction
+into the morning; on Nov 10 and 11 Dulles turned at 6 AM with the wind changing
+3-5 hours later. Small margins on 30 nights: reassessed in January (scheduled).
 """
 import bisect, calendar, collections, csv, datetime, io, json, math, os, statistics, time, urllib.request
 from zoneinfo import ZoneInfo
@@ -61,6 +72,9 @@ READY_HOURS = 14 * 24     # busy.html uses the Pi's numbers, and the Pi keeps fo
 KEEP_H = 12               # hours ahead the direction Dulles is landing now is kept (module docstring)
 TO_SOUTH_KT = 4           # knots from the south along the runways that end landing north; any from the north ends landing south
 FRESH_S = 2 * 3600        # how old "now" may be before the forecast stops using it (the page reads the same)
+QUIET_H = 8               # hours the last clear direction is carried through quiet hours (overnight)
+RESTART_HOUR = 5          # local hour the morning restart is taken at
+LOOK_H = 4                # hours from the restart whose forecast wind may set the morning direction
 VERSION = 1
 OM_URL = ("https://api.open-meteo.com/v1/forecast?latitude=38.9445&longitude=-77.4558"
           "&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=kn&timezone=America%2FNew_York"
@@ -303,21 +317,39 @@ def p_south(m, deg, kt):
     return b["p"] if b and b["p"] is not None else 0.5
 
 
-def kept(m, t, now):
-    """'S' or 'N' when hour t is within m['keep']['hours'] of a fresh m['now'] with a clear direction, else None."""
+def favours(m, deg, kt):
+    """'N' or 'S' when the wind clearly favours that way (the keep rule's thresholds), else None."""
+    u = along(deg, kt)
+    return "N" if u < 0 else "S" if u >= m["keep"]["to_south_kt"] else None
+
+
+def kept(m, t, now, wind_at=None):
+    """'S' or 'N' for hour t when it is within m['keep']['hours'] of a fresh m['now'] with a clear
+    direction, else None. If the morning restart (keep.restart_hour) falls between "now" and t, the
+    direction is the one the wind clearly favours in keep.look_h hours from it, if any (wind_at:
+    hour -> (degrees, knots) or None, the forecast)."""
     k, n = m.get("keep"), m.get("now")
     if not k or not n or n.get("flow") not in ("S", "N") or now - n["at"] > k["fresh_s"]:
         return None
-    return n["flow"] if t + 3600 > n["at"] and t < n["at"] + k["hours"] * 3600 else None
+    if not (t + 3600 > n["at"] and t < n["at"] + k["hours"] * 3600):
+        return None
+    f = n["flow"]
+    if wind_at and "restart_hour" in k:
+        g = -(-n["at"] // 3600) * 3600
+        while g <= t and local(g).hour != k["restart_hour"]:
+            g += 3600
+        if g <= t:
+            ahead = [favours(m, *w) for w in (wind_at(g + 3600 * i) for i in range(k["look_h"])) if w]
+            f = next((x for x in ahead if x), f)
+    return f
 
 
-def p_south_at(m, t, deg, kt, now):
+def p_south_at(m, t, deg, kt, now, wind_at=None):
     """p_south, or the direction Dulles is landing now kept until the wind clearly favours the other."""
-    f = kept(m, t, now)
+    f = kept(m, t, now, wind_at)
     if f is None:
         return p_south(m, deg, kt)
-    u = along(deg, kt)
-    return (0.0 if u < 0 else 1.0) if f == "S" else (1.0 if u >= m["keep"]["to_south_kt"] else 0.0)
+    return {"N": 0.0, "S": 1.0}.get(favours(m, deg, kt), 1.0 if f == "S" else 0.0)
 
 
 def predict(m, busy_data, om, now):
@@ -326,10 +358,12 @@ def predict(m, busy_data, om, now):
     hr, out = om["hourly"], {}
     if not usual:
         return out
+    winds = {t: (d, k) for t, d, k in zip(hr["time"], hr["wind_direction_10m"], hr["wind_speed_10m"])
+             if d is not None and k is not None}
     for t, deg, kt in zip(hr["time"], hr["wind_direction_10m"], hr["wind_speed_10m"]):
         if t + 3600 <= now or deg is None or kt is None:
             continue
-        lt, p = local(t), p_south_at(m, t, deg, kt, now)
+        lt, p = local(t), p_south_at(m, t, deg, kt, now, winds.get)
         out[t] = [deg, kt, usual[lt.weekday()][lt.hour] * (p * m["share"]["S"] + (1 - p) * m["share"]["N"])]
     return out
 
@@ -367,6 +401,22 @@ def score(forecasts, records, now, days=SCORE_DAYS):
 
 
 # ---- on the Pi, from publish.py
+
+def carried(now_flow, st):
+    """now_flow, or, when the last hour was too quiet to read, the last clear direction within QUIET_H
+    hours (kept in st['last_flow']; a changeover, 'M', clears it): marked quiet, with when it was seen."""
+    f = now_flow.get("flow")
+    if f in ("S", "N"):
+        st["last_flow"] = {"flow": f, "at": now_flow["at"]}
+        return now_flow
+    if f == "M":
+        st.pop("last_flow", None)
+        return now_flow
+    last = st.get("last_flow")
+    if last and now_flow["at"] - last["at"] <= QUIET_H * 3600:
+        return dict(now_flow, flow=last["flow"], quiet=True, seen=last["at"])
+    return now_flow
+
 
 def update(work_dir, now, state_dir, final, wx, fetch=get, budget_s=BUDGET_S, now_flow=None):
     """Count new settled hours, fill in their winds, keep today's forecast once it is morning,
@@ -419,9 +469,10 @@ def update(work_dir, now, state_dir, final, wx, fetch=get, budget_s=BUDGET_S, no
     st["no_wind"] = sorted(none)
 
     m = model(records, winds, "pi/farmcast.py on the farm's receiver: its recorded paths and KIAD METARs")
-    m["keep"] = {"hours": KEEP_H, "to_south_kt": TO_SOUTH_KT, "fresh_s": FRESH_S}
+    m["keep"] = {"hours": KEEP_H, "to_south_kt": TO_SOUTH_KT, "fresh_s": FRESH_S,
+                 "quiet_h": QUIET_H, "restart_hour": RESTART_HOUR, "look_h": LOOK_H}
     if now_flow:
-        m["now"] = now_flow
+        m["now"] = carried(now_flow, st)
     lt = local(now)
     today = lt.date().isoformat()
     if lt.hour >= MORNING_HOUR and today not in st["forecasts"] and m["ready"]:
