@@ -322,13 +322,46 @@ class Pages(unittest.TestCase):
         self.assertTrue(all(p == 1 and k == "S" for h, p, k in ps if h < t - 300 + 12 * 3600), "kept: landing south")
         low = seed["p_south"][1]["p"]
         self.assertTrue(all(p == low and k is None for h, p, k in ps if h >= t - 300 + 12 * 3600), "then the wind rule")
-        self.assertIn("so landing south assumed", pg.evaluate("fcText(FCSEL, FCDAYS[FCSEL].hours.findIndex(Boolean))"))
+        self.assertIn("landing south assumed (Dulles landing south now)",
+                      pg.evaluate("fcText(FCSEL, FCDAYS[FCSEL].hours.findIndex(Boolean))"))
         # the page and the Pi's twin agree, "now" included
         page = dict(pg.evaluate("FCDAYS.flatMap(d => d.hours.filter(Boolean).map(x => [x.t, x.exp]))"))
         with open(os.path.join(F.ROOT, "busy-seed.json")) as g:
             twin = C.predict(pi, json.load(g), json.loads(west), time.time())
         both = [h for h in page if h in twin and C.local(h).hour != 1]
         self.assertGreater(len(both), 40)
+        for h in both:
+            self.assertAlmostEqual(page[h], twin[h][2], places=9, msg=C.local(h).isoformat())
+        pg.close()
+        # overnight (owner, 11-12): carried through quiet hours, and at 5 AM the wind ahead sets the direction;
+        # the page and the Pi's twin still agree
+        tz = ZoneInfo("America/New_York")
+        today = datetime.date(2026, 11, 12)               # pinned: not a clock-change night
+        night = int(datetime.datetime.combine(today, datetime.time(23), tz).timestamp())
+        five = int(datetime.datetime.combine(today + datetime.timedelta(days=1), datetime.time(5), tz).timestamp())
+        hrs = [night - 3600 * 2 + 3600 * i for i in range(30)]
+        turning = json.dumps({"hourly": {"time": hrs, "wind_speed_10m": [5] * 30,
+                                         "wind_direction_10m": [0 if h >= five + 3 * 3600 else 270 for h in hrs]}})
+        quiet = dict(pi, keep=dict(pi["keep"], quiet_h=8, restart_hour=5, look_h=4),
+                     now={"flow": "S", "south": 0, "north": 0, "landings": 1, "at": night + 3 * 3600,
+                          "quiet": True, "seen": night})
+        pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/",
+                               fulfil={"farm-model.json?t=": json.dumps(quiet), "api.open-meteo.com": turning},
+                               clock=night + 3 * 3600 + 600)
+        self.assertEqual(errors, [])
+        self.assertEqual(pg.inner_text("#fc-now"), "Dulles was last landing south at 11:00 PM (it's quiet now), so the next "
+                         "12 hours assume it carries on until the wind turns to the north; at 5 AM it starts the way the wind "
+                         "will favour over the next 4 hours, if it clearly favours one.")
+        ps = dict((t, (p, k)) for t, p, k in pg.evaluate("FCDAYS.flatMap(d => d.hours.filter(Boolean).map(x => [x.t, x.p, x.kept]))"))
+        self.assertEqual(ps[five - 3600], (1, "S"), "4 AM: still the evening's south")
+        self.assertEqual(ps[five], (0, "N"), "5 AM: north, for the north wind due at 8")
+        self.assertIn("switching at 5 AM for the wind ahead", pg.evaluate(f"(() => {{ for (let r = 0; r < FCDAYS.length; r++) {{ "
+                      f"const i = FCDAYS[r].hours.findIndex(x => x && x.t === {five}); if (i >= 0) return fcText(r, i); }} }})()"))
+        page = dict(pg.evaluate("FCDAYS.flatMap(d => d.hours.filter(Boolean).map(x => [x.t, x.exp]))"))
+        with open(os.path.join(F.ROOT, "busy-seed.json")) as g:
+            twin = C.predict(quiet, json.load(g), json.loads(turning), night + 3 * 3600 + 600)
+        both = [h for h in page if h in twin and C.local(h).hour != 1]
+        self.assertGreater(len(both), 20)
         for h in both:
             self.assertAlmostEqual(page[h], twin[h][2], places=9, msg=C.local(h).isoformat())
         pg.close()
