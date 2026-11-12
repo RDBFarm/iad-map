@@ -302,6 +302,34 @@ class Pages(unittest.TestCase):
         self.assertIn("The Pi is counting its own numbers (3 of 336 hours so far)", pg.inner_text("#fc-record"))
         pg.close()
 
+    def test_farm_forecast_falls_back_to_the_weather_service(self):
+        # 11-12: the forecast went blank. Open-Meteo answers "Daily API request limit exceeded" (429, no CORS
+        # header, so the browser sees only a failed load) to an address many people share. The National
+        # Weather Service's hourly forecast stands in, in its own shape: local ISO times, mph, 16 compass points.
+        import datetime
+        from zoneinfo import ZoneInfo
+        h0 = datetime.datetime.fromtimestamp(int(time.time()) // 3600 * 3600, ZoneInfo("America/New_York"))
+        periods = [{"startTime": (h0 + datetime.timedelta(hours=i)).isoformat(),
+                    "windSpeed": "5 to 15 mph" if i == 1 else "5 mph", "windDirection": "W" if i else "SSW"} for i in range(156)]
+        nws = json.dumps({"properties": {"periods": periods}})
+        pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/", abort=("api.open-meteo.com",), fulfil={"api.weather.gov": nws})
+        self.assertEqual(errors, [])
+        self.assertIn("Wind from the National Weather Service today", pg.inner_text("#fc-note"))
+        hrs = pg.evaluate("FCDAYS.flatMap(d => d.hours.filter(Boolean).map(x => [x.t, x.dir, x.kt]))")
+        self.assertGreater(len(hrs), 100)
+        got = {t: (d, k) for t, d, k in hrs}
+        t0 = int(h0.timestamp())
+        self.assertEqual(got[t0][0], 202.5)                                  # SSW
+        self.assertAlmostEqual(got[t0 + 3600][1], 10 * 0.868976, places=6)  # "5 to 15 mph": its middle, in knots
+        self.assertEqual(got[t0 + 7200], (270, 5 * 0.868976))
+        self.assertTrue(pg.evaluate("document.querySelectorAll('#fc-blocks tr').length >= 6"))
+        pg.close()
+        # neither answers: the page says so, rather than showing nothing
+        pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/", abort=("api.open-meteo.com", "api.weather.gov"))
+        self.assertEqual(errors, [])
+        self.assertIn("The wind forecast could not be loaded", pg.inner_text("#fc-note"))
+        pg.close()
+
     def test_farm_forecast_keeps_the_way_dulles_is_landing_now(self):
         # 11-12: Dulles landed south from 10 AM in a west crosswind the wind rule read as 29% south. The Pi now
         # publishes the way it is landing ("now"), and the next 12 hours keep it until the wind clearly turns.
