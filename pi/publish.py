@@ -1030,7 +1030,12 @@ def update_farm_forecast(index, files, final, now, wx):
     hours it has, this run's t/ files for the rest). Never stops the map."""
     state_dir = os.path.join(os.path.dirname(DB_PATH), "farmcast")
     try:
-        if farmcast.update(WORK_DIR, now, state_dir, final, wx):
+        now_flow = farmcast.flow_now(lambda h: read_track_body(tracks.hour_name("t", h), files), now)
+    except Exception as e:
+        now_flow = None
+        print("publish: the way Dulles is landing now failed:", e, flush=True)
+    try:
+        if farmcast.update(WORK_DIR, now, state_dir, final, wx, now_flow=now_flow):
             print("publish: farm forecast numbers updated", flush=True)
     except Exception as e:
         print("publish: farm forecast failed:", e, flush=True)

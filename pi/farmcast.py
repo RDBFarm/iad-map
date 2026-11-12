@@ -27,6 +27,18 @@ keeps what the page would have said for every hour (predict(), the twin of
 buildForecast() in busy.html; tests/test_pages.py holds them equal). Once a
 6-hour block is over and counted it is scored against the planes that came,
 by how many days ahead it was forecast.
+
+The way Dulles is landing now (owner, 11-12: "would it make sense to just assume
+without a wind direction change the arrivals will continue in the same
+direction?"). Each run, flow_now() reads the last hour's landings; for the next
+KEEP_H hours the forecast assumes they keep that direction until the forecast
+wind clearly favours the other: any wind from the north ends landing south, and
+TO_SOUTH_KT or more from the south along the runways ends landing north. Beyond
+that, the wind rule above. Measured over Oct 13 - Nov 12 with the winds that blew
+(731 hours): right 96% of hours 1 h ahead, 92% at 6 h, 87% at 12 h, against 85-86%
+for the wind alone; at 24 h 82% against 85%, hence KEEP_H. This morning on 11-12
+Dulles turned to landing south at 10 AM in a 4-6 kt crosswind, which neither
+rule saw coming; this one follows it from the first hour it shows.
 """
 import bisect, calendar, collections, csv, datetime, io, json, math, os, statistics, time, urllib.request
 from zoneinfo import ZoneInfo
@@ -46,6 +58,9 @@ SCORE_DAYS = 28
 ARCHIVE_AFTER_S = 6 * 3600   # an hour publish's reports missed is looked up in the archive after this
 BUDGET_S = 60
 READY_HOURS = 14 * 24     # busy.html uses the Pi's numbers, and the Pi keeps forecasts, from this many hours on
+KEEP_H = 12               # hours ahead the direction Dulles is landing now is kept (module docstring)
+TO_SOUTH_KT = 4           # knots from the south along the runways that end landing north; any from the north ends landing south
+FRESH_S = 2 * 3600        # how old "now" may be before the forecast stops using it (the page reads the same)
 VERSION = 1
 OM_URL = ("https://api.open-meteo.com/v1/forecast?latitude=38.9445&longitude=-77.4558"
           "&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=kn&timezone=America%2FNew_York"
@@ -92,14 +107,12 @@ def closest(body):
     return out
 
 
-def hour_record(h, load, south_degs=None):
-    """[flow, landings, near, above] for hour h, from load(hour) -> parsed t/ file or None.
-    south_degs, if a list, gets the direction of each landing that went south."""
-    bodies = [b for b in (load(h - 3600), load(h), load(h + 3600)) if b]
-    paths = busy.paths_from_files(bodies)
+def landing_ways(paths, start, end, south_degs=None):
+    """(Counter of 'N' / 'S' / None, landings) for Dulles's landings in [start, end): the way each
+    flew in the 2.5 minutes before it got low. south_degs, if a list, gets each southward one's direction."""
     ways, landings = collections.Counter(), 0
     for t, kind, hexid in busy.movements(paths):
-        if kind != "a" or not h <= t < h + 3600:
+        if kind != "a" or not start <= t < end:
             continue
         landings += 1
         seg = sorted(p for p in paths[hexid] if p[3] is not None and t - 150 <= p[0] <= t)
@@ -109,8 +122,30 @@ def hour_record(h, load, south_degs=None):
             ways[w] += 1
             if w == "S" and south_degs is not None:
                 south_degs.append(b)
+    return ways, landings
+
+
+def flow_of(ways):
     n, s = ways["N"], ways["S"]
-    flow = None if n + s < 3 else "N" if n >= 0.8 * (n + s) else "S" if s >= 0.8 * (n + s) else "M"
+    return None if n + s < 3 else "N" if n >= 0.8 * (n + s) else "S" if s >= 0.8 * (n + s) else "M"
+
+
+def flow_now(load, now):
+    """The way Dulles has been landing over the last hour, from this run's t/ files:
+    {"flow": "S" | "N" | "M" | None, "south", "north", "landings", "at"}."""
+    h = int(now) // 3600 * 3600
+    paths = busy.paths_from_files([b for b in (load(h - 3600), load(h)) if b])
+    ways, landings = landing_ways(paths, now - 3600, now)
+    return {"flow": flow_of(ways), "south": ways["S"], "north": ways["N"], "landings": landings, "at": int(now)}
+
+
+def hour_record(h, load, south_degs=None):
+    """[flow, landings, near, above] for hour h, from load(hour) -> parsed t/ file or None.
+    south_degs, if a list, gets the direction of each landing that went south."""
+    bodies = [b for b in (load(h - 3600), load(h), load(h + 3600)) if b]
+    paths = busy.paths_from_files(bodies)
+    ways, landings = landing_ways(paths, h, h + 3600, south_degs)
+    flow = flow_of(ways)
     body = load(h)
     cl = [(d, alt) for d, alt in (closest(body).values() if body else []) if d <= NEAR_MI and alt is not None]
     near = sum(1 for _, alt in cl if alt < BELOW_FT)
@@ -268,6 +303,23 @@ def p_south(m, deg, kt):
     return b["p"] if b and b["p"] is not None else 0.5
 
 
+def kept(m, t, now):
+    """'S' or 'N' when hour t is within m['keep']['hours'] of a fresh m['now'] with a clear direction, else None."""
+    k, n = m.get("keep"), m.get("now")
+    if not k or not n or n.get("flow") not in ("S", "N") or now - n["at"] > k["fresh_s"]:
+        return None
+    return n["flow"] if t + 3600 > n["at"] and t < n["at"] + k["hours"] * 3600 else None
+
+
+def p_south_at(m, t, deg, kt, now):
+    """p_south, or the direction Dulles is landing now kept until the wind clearly favours the other."""
+    f = kept(m, t, now)
+    if f is None:
+        return p_south(m, deg, kt)
+    u = along(deg, kt)
+    return (0.0 if u < 0 else 1.0) if f == "S" else (1.0 if u >= m["keep"]["to_south_kt"] else 0.0)
+
+
 def predict(m, busy_data, om, now):
     """{hour: [degrees, knots, planes expected]} for every forecast hour not yet over."""
     usual = usual_landings(busy_data)
@@ -277,7 +329,7 @@ def predict(m, busy_data, om, now):
     for t, deg, kt in zip(hr["time"], hr["wind_direction_10m"], hr["wind_speed_10m"]):
         if t + 3600 <= now or deg is None or kt is None:
             continue
-        lt, p = local(t), p_south(m, deg, kt)
+        lt, p = local(t), p_south_at(m, t, deg, kt, now)
         out[t] = [deg, kt, usual[lt.weekday()][lt.hour] * (p * m["share"]["S"] + (1 - p) * m["share"]["N"])]
     return out
 
@@ -316,9 +368,10 @@ def score(forecasts, records, now, days=SCORE_DAYS):
 
 # ---- on the Pi, from publish.py
 
-def update(work_dir, now, state_dir, final, wx, fetch=get, budget_s=BUDGET_S):
+def update(work_dir, now, state_dir, final, wx, fetch=get, budget_s=BUDGET_S, now_flow=None):
     """Count new settled hours, fill in their winds, keep today's forecast once it is morning,
-    and write farm-model.json (with the forecasts' record) when it changed. Returns True if written."""
+    and write farm-model.json (with the forecasts' record) when it changed. Returns True if written.
+    now_flow: flow_now() of this run, published as "now" and used by the forecast."""
     os.makedirs(state_dir, exist_ok=True)
     path = os.path.join(state_dir, "state.json")
     try:
@@ -366,6 +419,9 @@ def update(work_dir, now, state_dir, final, wx, fetch=get, budget_s=BUDGET_S):
     st["no_wind"] = sorted(none)
 
     m = model(records, winds, "pi/farmcast.py on the farm's receiver: its recorded paths and KIAD METARs")
+    m["keep"] = {"hours": KEEP_H, "to_south_kt": TO_SOUTH_KT, "fresh_s": FRESH_S}
+    if now_flow:
+        m["now"] = now_flow
     lt = local(now)
     today = lt.date().isoformat()
     if lt.hour >= MORNING_HOUR and today not in st["forecasts"] and m["ready"]:

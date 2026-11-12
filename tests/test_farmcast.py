@@ -106,6 +106,37 @@ class FarmForecast(unittest.TestCase):
         iem = "station,valid,drct,sknt\nIAD,2026-10-20 18:52,170.00,9.00\nIAD,2026-10-20 19:52,M,4.00\nIAD,2026-10-20 20:52,M,M\n"
         self.assertEqual(C.reports_from_iem(iem), [(at(2026, 10, 20, 14, 52), 170.0, 9.0), (at(2026, 10, 20, 15, 52), None, 4.0)])
 
+    def test_the_way_it_is_landing_now(self):
+        # 11-12: Dulles turned to landing south at 10 AM in a crosswind the wind rule read as 29% south.
+        # The forecast now keeps the way it is landing for KEEP_H hours, until the wind clearly favours the other.
+        load = lambda h: P.read_track_body(P.tracks.hour_name("t", h))
+        now = C.flow_now(load, F.T0 + 2 * 3600 + 1800)
+        self.assertEqual((now["flow"], now["south"], now["north"]), ("S", 3, 0), "three arrivals an hour down the west lane")
+        self.assertIsNone(C.flow_now(load, F.T0 - 7200)["flow"], "nothing heard: no direction")
+        m = {"axis_deg": C.AXIS_DEG, "share": {"S": 0.75, "N": 0.02},
+             "p_south": [{"from_kt": None, "to_kt": 0, "p": 0.04}, {"from_kt": 0, "to_kt": 2, "p": 0.29},
+                         {"from_kt": 2, "to_kt": 4, "p": 0.73}, {"from_kt": 4, "to_kt": None, "p": 0.95}],
+             "keep": {"hours": C.KEEP_H, "to_south_kt": C.TO_SOUTH_KT, "fresh_s": C.FRESH_S}}
+        t0 = at(2026, 11, 12, 11)
+        south = dict(m, now={"flow": "S", "at": t0 + 600})
+        north = dict(m, now={"flow": "N", "at": t0 + 600})
+        self.assertEqual(C.p_south_at(south, t0, 270, 5, t0 + 600), 1.0, "a crosswind keeps it landing south")
+        self.assertEqual(C.p_south_at(south, t0 + 3600, 350, 5, t0 + 600), 0.0, "any wind from the north ends it")
+        self.assertEqual(C.p_south_at(south, t0 + 13 * 3600, 270, 5, t0 + 600), 0.29, "beyond 12 hours, the wind rule")
+        self.assertEqual(C.p_south_at(north, t0, 200, 3, t0 + 600), 0.0, "3 kt from the south doesn't turn it")
+        self.assertEqual(C.p_south_at(north, t0, 180, 5, t0 + 600), 1.0, "5 kt from the south does")
+        self.assertEqual(C.p_south_at(south, t0 + 7200, 270, 5, t0 + 600 + C.FRESH_S + 1), 0.29, "a stale 'now' is not used")
+        self.assertEqual(C.p_south_at(dict(m, now={"flow": "M", "at": t0}), t0, 270, 5, t0), 0.29, "changing over: the wind")
+        self.assertEqual(C.p_south_at(m, t0, 270, 5, t0), 0.29, "no 'now' (the repository's copy): the wind")
+        # published in farm-model.json with the rule's numbers, for the page
+        hours = [F.T0 + 3600 * i for i in range(F.HOURS)]
+        C.update(F.WORK, F.NOW + 3 * 3600, os.path.join(self.tmp, "fc"), self.final, wx_for(hours), Fetches(),
+                 now_flow=now)
+        with open(os.path.join(F.WORK, "farm-model.json")) as f:
+            pub = json.load(f)
+        self.assertEqual(pub["now"], now)
+        self.assertEqual(pub["keep"], {"hours": 12, "to_south_kt": 4, "fresh_s": 7200})
+
     def test_numbers(self):
         records = {at(2026, 10, 20, i): ["S" if i < 10 else "N", 10, 8 if i < 10 else 0, 3] for i in range(20)}
         winds = {h: [180 if r[0] == "S" else 0, 10] for h, r in records.items()}

@@ -98,6 +98,7 @@
   <div class="panel farm" id="fc-panel">
     <h2>Over the farm, the next 7 days</h2>
     <div class="note" id="fc-note">Loading the wind forecast…</div>
+    <div class="note" id="fc-now"></div>
     <div class="tablewrap"><table class="fc">
       <thead><tr><th></th><th>Night<small>12–6a</small></th><th>Morning<small>6a–12p</small></th><th>Afternoon<small>12–6p</small></th><th>Evening<small>6p–12a</small></th></tr></thead>
       <tbody id="fc-blocks"></tbody>
@@ -442,6 +443,20 @@ function pSouth(dir, kt) {
   const b = MODEL.p_south.find(x => (x.from_kt == null || u >= x.from_kt) && (x.to_kt == null || u < x.to_kt));
   return b && b.p != null ? b.p : 0.5;
 }
+// The way Dulles is landing now, from the Pi (farm-model.json "now"; pi/farmcast.py, the twin of
+// kept() and p_south_at()): kept for the next MODEL.keep.hours until the wind clearly favours the
+// other way (owner, 11-12: "assume without a wind direction change the arrivals will continue in the same direction")
+function keptFlow(t, now) {
+  const k = MODEL.keep, n = MODEL.now;
+  if (!k || !n || (n.flow !== 'S' && n.flow !== 'N') || now - n.at > k.fresh_s) return null;
+  return t + 3600 > n.at && t < n.at + k.hours * 3600 ? n.flow : null;
+}
+function pSouthAt(t, dir, kt, now) {
+  const f = keptFlow(t, now);
+  if (!f) return pSouth(dir, kt);
+  const u = kt < 0.5 ? 0 : kt * Math.cos((dir - MODEL.axis_deg) * Math.PI / 180);
+  return f === 'S' ? (u < 0 ? 0 : 1) : (u >= MODEL.keep.to_south_kt ? 1 : 0);
+}
 function buildForecast(om) {
   const hr = om.hourly, now = Date.now() / 1000, usual = usualLandings(), days = [];
   hr.time.forEach((t, i) => {
@@ -450,9 +465,9 @@ function buildForecast(om) {
     if (!d) { d = {date: e.date, wd: e.wd, hours: new Array(24).fill(null)}; days.push(d); }
     const dir = hr.wind_direction_10m[i], kt = hr.wind_speed_10m[i];
     if (t + 3600 <= now || dir == null || kt == null || !usual) return;
-    const p = pSouth(dir, kt), exp = usual[e.wd][e.hour] * (p * MODEL.share.S + (1 - p) * MODEL.share.N);
+    const p = pSouthAt(t, dir, kt, now), exp = usual[e.wd][e.hour] * (p * MODEL.share.S + (1 - p) * MODEL.share.N);
     const prev = d.hours[e.hour];          // the hour that happens twice when the clocks go back
-    d.hours[e.hour] = prev ? {...prev, exp: prev.exp + exp} : {t, exp, p, dir, kt};
+    d.hours[e.hour] = prev ? {...prev, exp: prev.exp + exp} : {t, exp, p, dir, kt, kept: keptFlow(t, now)};
   });
   return days.slice(0, 7);
 }
@@ -537,7 +552,9 @@ function drawForecast() { drawFcBlocks(); drawFcGrid(); drawFcBars(); fcShowPick
 function fcText(r, hh) {
   const x = FCDAYS && FCDAYS[r] && FCDAYS[r].hours[hh];
   return x ? `${dayLabel(FCDAYS[r], r)} ${hourSpan(hh)}: about ${Math.round(x.exp)} planes · wind from the ` +
-    `${COMPASS[Math.round(x.dir / 22.5) % 16]} at ${Math.round(x.kt)} kt · Dulles landing south ${Math.round(x.p * 100)}% likely` : '';
+    `${COMPASS[Math.round(x.dir / 22.5) % 16]} at ${Math.round(x.kt)} kt · ` + (x.kept
+      ? `Dulles landing ${x.kept === 'S' ? 'south' : 'north'} now, so landing ${x.p ? 'south' : 'north'} assumed`
+      : `Dulles landing south ${Math.round(x.p * 100)}% likely`) : '';
 }
 function fcShowPick() {
   const t = fcText(FCSEL, FCPICK);
@@ -591,6 +608,12 @@ async function loadForecast() {
   if (failed) { note.textContent = 'The wind forecast could not be loaded (' + failed.reason.message + ').'; return; }
   FCDAYS = buildForecast(om.value);
   document.getElementById('fc-record').textContent = recordText(PI);
+  const kf = keptFlow(Date.now() / 1000, Date.now() / 1000), n = MODEL.now;
+  document.getElementById('fc-now').textContent = kf ? `Dulles has been landing ${kf === 'S' ? 'south' : 'north'} ` +
+    `(${kf === 'S' ? n.south : n.north} of the last hour's ${n.south + n.north} landings), so the next ${MODEL.keep.hours} ` +
+    `hours assume it carries on until the wind ${kf === 'S' ? 'turns to the north' : `blows ${MODEL.keep.to_south_kt}+ knots from the south`}.`
+    : n && n.flow === 'M' && Date.now() / 1000 - n.at <= MODEL.keep.fresh_s
+    ? 'Dulles is changing the way it lands; until it settles the forecast follows the wind.' : '';
   const pct = x => Math.round(x * 100);
   // his wording, 10-24; the detail is under (i)
   note.textContent = `Planes expected to fly within ${MODEL.near_mi} miles of the farm during final approach.`;
@@ -607,7 +630,11 @@ async function loadForecast() {
     `${pct(MODEL.p_south[0].p)}% with any wind from the north. Checked on the same weeks with the winds that actually blew: ` +
     (k.quiet_blocks && k.busy_blocks ? `6-hour blocks it called quiet had a median of ${k.quiet_blocks.median} planes, ` +
     `busy ones ${k.busy_blocks.median} (fewest ${k.busy_blocks.min}); but Dulles doesn't always go with the wind, and one ` +
-    `"quiet" block had ${k.quiet_blocks.max}. ` : '') + 'A forecast wind can be wrong as well.';
+    `"quiet" block had ${k.quiet_blocks.max}. ` : '') + 'A forecast wind can be wrong as well.' +
+    (MODEL.keep ? ` For the next ${MODEL.keep.hours} hours it assumes Dulles keeps landing the way it is now until the wind ` +
+    `clearly favours the other way (any wind from the north ends landing south; ${MODEL.keep.to_south_kt}+ knots from the south ends ` +
+    'landing north). Over Oct 13 – Nov 12, with the winds that blew, that was right 96% of hours an hour ahead, 92% six hours ' +
+    'ahead and 87% twelve hours ahead, against 85–86% for the wind alone; further out the wind alone does better.' : '');
   FCSEL = FCDAYS[0].hours.some(Boolean) ? 0 : 1;
   drawForecast();
 }
