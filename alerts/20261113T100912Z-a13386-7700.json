@@ -1,0 +1,23 @@
+{
+ "title": "\ud83d\udea8 7700 DAL960 (Delta Air Lines) B763 \u2014 general emergency",
+ "body": "@RDBFarm \u2014 heard by the farm receiver at 2026-11-13 10:09:12 UTC.\n\n- **Squawk:** 7700 (general emergency)\n- **ADS-B emergency status:** general emergency\n- **Flight:** DAL960 \u2014 Delta Air Lines (radio callsign DELTA)\n- **Aircraft:** registration N177DN, type B763 (BOEING 767-300), ICAO A13386\n- **Position:** 41.7509, -77.4203 \u2014 156 nm from the farm, bearing 1\u00b0\n- **Altitude:** 37,000 ft; **speed** 498 kt; **track** 110\u00b0\n\n[ADS-B Exchange](https://globe.adsbexchange.com/?icao=a13386) \u00b7 [Farm receiver (farm network only)](http://192.168.1.190/tar1090/?icao=a13386) \u00b7 [Live map](https://rdbfarm.github.io/iad-map/live.html)\n\n_Automatic alert from `pi/alerts.py`. A squawk can be set by mistake and corrected within seconds; this confirms only that the code was seen on 3 reads in a row._",
+ "event": {
+  "t": 1794564552,
+  "utc": "2026-11-13 10:09:12",
+  "hex": "a13386",
+  "flight": "DAL960",
+  "type": "B763",
+  "code": "7700",
+  "emergency": "general",
+  "squawk": "7700",
+  "lat": 41.750887,
+  "lon": -77.420271,
+  "alt": 37000,
+  "gs": 497.8,
+  "track": 109.6,
+  "mlat": 0,
+  "dist_nm": 156.0,
+  "bearing": 0.6,
+  "pushed": true
+ }
+}
