@@ -12,7 +12,7 @@
    "from_kt": null,
    "to_kt": 0,
    "p": 0.04,
-   "hours": 484
+   "hours": 485
   },
   {
    "from_kt": 0,
@@ -38,12 +38,12 @@
   "N": 7.5
  },
  "hours": {
-  "counted": 1199,
+  "counted": 1200,
   "south": 345,
-  "north": 710,
+  "north": 711,
   "mixed": 38,
   "unclear": 106,
-  "with_wind": 1198
+  "with_wind": 1199
  },
  "ready": true,
  "first": "2026-09-25",
@@ -51,11 +51,11 @@
  "check": {
   "note": "the rule on the same weeks with the winds that blew, not forecasts",
   "hourly_corr": 0.79,
-  "block_corr": 0.86,
-  "blocks": 196,
+  "block_corr": 0.87,
+  "blocks": 197,
   "quiet_blocks": {
-   "n": 86,
-   "median": 1.0,
+   "n": 87,
+   "median": 1,
    "max": 118
   },
   "busy_blocks": {
@@ -76,9 +76,9 @@
  "now": {
   "flow": "N",
   "south": 0,
-  "north": 13,
-  "landings": 13,
-  "at": 1794679206
+  "north": 12,
+  "landings": 12,
+  "at": 1794680108
  },
  "score": {
   "days": 28,
@@ -86,52 +86,52 @@
   "by_lead": [
    {
     "lead": 0,
-    "blocks": 64,
-    "median_err": 9.6,
-    "median_actual": 26.0,
-    "median_forecast": 22.2
+    "blocks": 65,
+    "median_err": 9.4,
+    "median_actual": 24,
+    "median_forecast": 21.1
    },
    {
     "lead": 1,
-    "blocks": 85,
-    "median_err": 7.7,
-    "median_actual": 6,
-    "median_forecast": 13.3
+    "blocks": 86,
+    "median_err": 7.6,
+    "median_actual": 5.5,
+    "median_forecast": 13.2
    },
    {
     "lead": 2,
-    "blocks": 81,
+    "blocks": 82,
     "median_err": 7.5,
-    "median_actual": 8,
-    "median_forecast": 11.0
+    "median_actual": 7.5,
+    "median_forecast": 10.7
    },
    {
     "lead": 3,
-    "blocks": 77,
-    "median_err": 7.0,
-    "median_actual": 7,
-    "median_forecast": 13.3
+    "blocks": 78,
+    "median_err": 6.9,
+    "median_actual": 6.5,
+    "median_forecast": 12.7
    },
    {
     "lead": 4,
-    "blocks": 73,
+    "blocks": 74,
     "median_err": 7.6,
-    "median_actual": 8,
-    "median_forecast": 14.9
+    "median_actual": 7.5,
+    "median_forecast": 14.8
    },
    {
     "lead": 5,
-    "blocks": 69,
-    "median_err": 12.9,
-    "median_actual": 13,
-    "median_forecast": 17.1
+    "blocks": 70,
+    "median_err": 12.3,
+    "median_actual": 13.0,
+    "median_forecast": 16.8
    },
    {
     "lead": 6,
-    "blocks": 59,
-    "median_err": 9.6,
-    "median_actual": 8,
-    "median_forecast": 12.2
+    "blocks": 60,
+    "median_err": 9.5,
+    "median_actual": 7.0,
+    "median_forecast": 12.0
    }
   ]
  }
