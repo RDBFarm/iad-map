@@ -635,7 +635,19 @@ function recordText(pi) {
   if (!pick.length) return 'The Pi keeps each morning\'s forecast and checks it once the day is over; its record will show here.';
   const parts = pick.map((x, i) => i ? `${name(x.lead)} ${x.median_err}` : `${name(x.lead)} were off by a median of ${x.median_err} planes`);
   return `How it has done (last ${pi.score.days} days): 6-hour blocks forecast ${parts.join('; ')}. ` +
-    `A typical block had ${pick[0].median_actual}.`;
+    `A typical block had ${pick[0].median_actual}.` + directionText(pi.score.direction, name);
+}
+// Which way it expected Dulles to land against the way it did (owner, 11-20: "are you keeping track of what
+// was expected and what actually happened?"), from the Pi's score.direction: hours with a clear direction.
+function directionText(dir, name) {
+  if (!dir) return '';                   // a Pi from before 11-20
+  const pct = x => Math.round(x * 100) + '%';
+  const pick = [0, 1, 3, 6].map(l => dir.find(x => x.lead === l && x.hours >= 24)).filter(Boolean);
+  if (!pick.length) return ' Which way Dulles would land is checked too; that record will show here.';
+  const parts = pick.map((x, i) => i ? `${name(x.lead)} ${pct(x.right)}` : `right ${pct(x.right)} of hours ${name(x.lead)}`);
+  const f = pick[0];
+  return ` Which way Dulles would land: ${parts.join('; ')}. ${name(f.lead)[0].toUpperCase() + name(f.lead).slice(1)} ` +
+    `it gave landing south a ${pct(f.said_south)} chance on average; Dulles landed south ${pct(f.was_south)} of those hours.`;
 }
 async function loadForecast() {
   const note = document.getElementById('fc-note');
