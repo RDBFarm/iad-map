@@ -199,6 +199,7 @@ class FarmForecast(unittest.TestCase):
             m = json.load(f)
         self.assertTrue(m["ready"])
         self.assertAlmostEqual(hours[at(2026, 10, 21, 15)][2], 4 * m["share"]["S"], places=3)   # south wind: p = 1
+        self.assertEqual(hours[at(2026, 10, 21, 15)][3], 1.0, "the chance of landing south is kept too")
         self.assertEqual(m["score"]["forecasts"], 1)
 
     def test_record_by_days_ahead(self):
@@ -212,6 +213,21 @@ class FarmForecast(unittest.TestCase):
         self.assertEqual(by[1]["median_err"], 6.0)               # 12 forecast, 18 came
         self.assertEqual((by[1]["median_forecast"], by[1]["median_actual"]), (12.0, 18))
         self.assertEqual(C.score(forecasts, records, at(2026, 12, 1))["forecasts"], 0, "only the last 28 days")
+
+    def test_direction_by_days_ahead(self):
+        # owner, 11-20: "are you keeping track of what was expected and what actually happened?"
+        issued = datetime.date(2026, 11, 20)
+        h0 = at(2026, 11, 20, 6)
+        said = {h0: 0.9, h0 + 3600: 0.2, h0 + 7200: 0.5, h0 + 10800: 0.7, h0 + 86400: 0.1}
+        forecasts = {issued.isoformat(): {"issued": h0 + 300, "hours": {str(h): [180, 10, 2.0, p] for h, p in said.items()}},
+                     "2026-11-19": {"issued": h0 - 86400, "hours": {str(h0): [180, 10, 2.0]}}}   # kept before 11-20: no chance
+        records = {h0: ["S", 9, 7, 0], h0 + 3600: ["N", 9, 0, 0], h0 + 7200: ["S", 9, 7, 0],
+                   h0 + 10800: ["M", 9, 3, 0], h0 + 86400: ["S", 9, 7, 0]}
+        d = {x["lead"]: x for x in C.score(forecasts, records, at(2026, 11, 22))["direction"]}
+        # same day: right, right, half (0.5), and the changeover hour left out
+        self.assertEqual(d[0], {"lead": 0, "hours": 3, "right": 0.833, "said_south": 0.533, "was_south": 0.667})
+        self.assertEqual(d[1], {"lead": 1, "hours": 1, "right": 0.0, "said_south": 0.1, "was_south": 1.0})
+        self.assertEqual(set(d), {0, 1})
 
     def test_blocks_on_clock_change_days(self):
         self.assertEqual(len(C.block_hours(datetime.date(2026, 10, 20), 0)), 6)

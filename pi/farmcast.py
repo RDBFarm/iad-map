@@ -26,7 +26,8 @@ Open-Meteo's 7-day hourly wind for Dulles, the forecast busy.html shows, and
 keeps what the page would have said for every hour (predict(), the twin of
 buildForecast() in busy.html; tests/test_pages.py holds them equal). Once a
 6-hour block is over and counted it is scored against the planes that came,
-by how many days ahead it was forecast.
+by how many days ahead it was forecast; each kept hour also carries its chance of
+landing south, scored against the way Dulles did land (score()'s direction, from 11-20).
 
 The way Dulles is landing now (owner, 11-12: "would it make sense to just assume
 without a wind direction change the arrivals will continue in the same
@@ -353,7 +354,7 @@ def p_south_at(m, t, deg, kt, now, wind_at=None):
 
 
 def predict(m, busy_data, om, now):
-    """{hour: [degrees, knots, planes expected]} for every forecast hour not yet over."""
+    """{hour: [degrees, knots, planes expected, chance of landing south]} for every forecast hour not yet over."""
     usual = usual_landings(busy_data)
     hr, out = om["hourly"], {}
     if not usual:
@@ -364,7 +365,7 @@ def predict(m, busy_data, om, now):
         if t + 3600 <= now or deg is None or kt is None:
             continue
         lt, p = local(t), p_south_at(m, t, deg, kt, now, winds.get)
-        out[t] = [deg, kt, usual[lt.weekday()][lt.hour] * (p * m["share"]["S"] + (1 - p) * m["share"]["N"])]
+        out[t] = [deg, kt, usual[lt.weekday()][lt.hour] * (p * m["share"]["S"] + (1 - p) * m["share"]["N"]), p]
     return out
 
 
@@ -378,9 +379,15 @@ def block_hours(day, b):
 
 def score(forecasts, records, now, days=SCORE_DAYS):
     """How the kept forecasts did, by days ahead: each whole 6-hour block that is over and counted,
-    planes forecast against planes that came within NEAR_MI below BELOW_FT."""
+    planes forecast against planes that came within NEAR_MI below BELOW_FT. And the way Dulles would land
+    (owner, 11-20: "are you keeping track of what was expected and what actually happened?"): every counted
+    hour with a clear direction (S or N), by days ahead: how often the forecast leaned the right way (a chance
+    of landing south over 0.5 means south, under means north, exactly 0.5 counts half), the average chance of
+    landing south it gave, and the share of those hours Dulles did land south. Forecasts kept before 11-20
+    carry no chance and are left out of this part."""
     since = local(now).date() - datetime.timedelta(days=days)
     pairs = collections.defaultdict(list)
+    ways = collections.defaultdict(list)      # lead -> [(chance of south, landed south)]
     kept = 0
     for issued, f in forecasts.items():
         issued_day = datetime.date.fromisoformat(issued)
@@ -388,6 +395,9 @@ def score(forecasts, records, now, days=SCORE_DAYS):
             continue
         kept += 1
         hours = {int(h): v for h, v in f["hours"].items()}
+        for h, v in hours.items():
+            if len(v) > 3 and h in records and records[h][0] in ("S", "N"):
+                ways[(local(h).date() - issued_day).days].append((v[3], records[h][0] == "S"))
         for day, b in {(local(h).date(), local(h).hour // 6) for h in hours}:
             want = block_hours(day, b)
             if all(h in hours and h in records for h in want):
@@ -397,7 +407,13 @@ def score(forecasts, records, now, days=SCORE_DAYS):
          "median_err": round(statistics.median(abs(p - a) for p, a in pairs[lead]), 1),
          "median_actual": statistics.median(a for _, a in pairs[lead]),
          "median_forecast": round(statistics.median(p for p, _ in pairs[lead]), 1)}
-        for lead in sorted(pairs)]}
+        for lead in sorted(pairs)],
+        "direction": [
+        {"lead": lead, "hours": len(ways[lead]),
+         "right": round(sum(1 if (p > 0.5) == s and p != 0.5 else 0.5 if p == 0.5 else 0 for p, s in ways[lead]) / len(ways[lead]), 3),
+         "said_south": round(sum(p for p, _ in ways[lead]) / len(ways[lead]), 3),
+         "was_south": round(sum(s for _, s in ways[lead]) / len(ways[lead]), 3)}
+        for lead in sorted(ways)]}
 
 
 # ---- on the Pi, from publish.py
@@ -481,7 +497,8 @@ def update(work_dir, now, state_dir, final, wx, fetch=get, budget_s=BUDGET_S, no
                 busy_data = json.load(f)
             hrs = predict(m, busy_data, json.loads(fetch(OM_URL, 30)), now)
             if hrs:
-                st["forecasts"][today] = {"issued": int(now), "hours": {str(h): [d, k, round(e, 3)] for h, (d, k, e) in hrs.items()}}
+                st["forecasts"][today] = {"issued": int(now), "hours": {str(h): [d, k, round(e, 3), round(p, 3)]
+                                                                       for h, (d, k, e, p) in hrs.items()}}
         except Exception as e:
             print("farmcast: no forecast kept this time:", e, flush=True)
     oldest = (lt.date() - datetime.timedelta(days=KEEP_FORECAST_DAYS)).isoformat()

@@ -282,7 +282,11 @@ class Pages(unittest.TestCase):
                   score={"days": 28, "forecasts": 9, "by_lead": [
                       {"lead": 0, "blocks": 12, "median_err": 4.0, "median_actual": 15, "median_forecast": 13.0},
                       {"lead": 1, "blocks": 20, "median_err": 6.5, "median_actual": 14, "median_forecast": 12.0},
-                      {"lead": 3, "blocks": 3, "median_err": 9.0, "median_actual": 14, "median_forecast": 10.0}]})
+                      {"lead": 3, "blocks": 3, "median_err": 9.0, "median_actual": 14, "median_forecast": 10.0}],
+                         "direction": [
+                      {"lead": 0, "hours": 60, "right": 0.917, "said_south": 0.34, "was_south": 0.22},
+                      {"lead": 1, "hours": 90, "right": 0.85, "said_south": 0.3, "was_south": 0.25},
+                      {"lead": 3, "hours": 12, "right": 0.5, "said_south": 0.3, "was_south": 0.25}]})
         om = json.dumps({"hourly": {"time": [int(time.time()) // 3600 * 3600 + 3600 * i for i in range(48)],
                                     "wind_speed_10m": [10] * 48, "wind_direction_10m": [180] * 48}})
         pg, errors = self.open("busy.html", data=self.site_url + "no-such-branch/",
@@ -290,7 +294,9 @@ class Pages(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertIn("50% of its arrivals", pg.evaluate("document.getElementById('fc-about').textContent"))
         self.assertEqual(pg.inner_text("#fc-record"), "How it has done (last 28 days): 6-hour blocks forecast later the "
-                         "same day were off by a median of 4 planes; the next day 6.5. A typical block had 15.")
+                         "same day were off by a median of 4 planes; the next day 6.5. A typical block had 15. "
+                         "Which way Dulles would land: right 92% of hours later the same day; the next day 85%. "
+                         "Later the same day it gave landing south a 34% chance on average; Dulles landed south 22% of those hours.")
         pg.close()
         # the Pi's own numbers before they cover two weeks: the snapshot is used, and the page says so
         with open(os.path.join(F.WORK, "farm-model.json")) as f:      # the made-up log's: three hours
@@ -358,8 +364,10 @@ class Pages(unittest.TestCase):
             twin = C.predict(pi, json.load(g), json.loads(west), time.time())
         both = [h for h in page if h in twin and C.local(h).hour != 1]
         self.assertGreater(len(both), 40)
+        pdir = dict(pg.evaluate("FCDAYS.flatMap(d => d.hours.filter(Boolean).map(x => [x.t, x.p]))"))
         for h in both:
             self.assertAlmostEqual(page[h], twin[h][2], places=9, msg=C.local(h).isoformat())
+            self.assertAlmostEqual(pdir[h], twin[h][3], places=9, msg="the chance of landing south the Pi keeps")
         pg.close()
         # overnight (owner, 11-12): carried through quiet hours, and at 5 AM the wind ahead sets the direction;
         # the page and the Pi's twin still agree
