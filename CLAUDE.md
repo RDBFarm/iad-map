@@ -18,7 +18,7 @@ days of each, the day files `d/`, both history heat maps, `busy.json`,
 `farm-model.json`), `iad-map-aircraft-db.timer` (monthly type lookup),
 `iad-map-netcheck.timer` (every 5 min, from 10-22: name lookups, diagnosis,
 self-renewal; "Lookup outage" below). `live.json` `meta.pi_version` says what is
-installed. **Installed 11-12 (first upload 12:30 PM EST): 5d56b9d** — the farm
+installed. **Installed 11-20 (~10:32 AM EST; first upload wholly on it 10:46 AM): feedaa1** — the kept forecasts carry the chance of landing south and `score.direction` scores it (#125; empty until the 11-21 morning forecast; the 10:30 run straddled the install and reported feedaa1 on the old code). Before it **5d56b9d (11-12, first upload 12:30 PM EST)** — the farm
 forecast keeps the way Dulles is landing, overnight too, with the 5 AM rule (#115,
 #116, §4 Farm forecast); its first `now`: south, 25 of 25 landings. Before it
 9470b59 (10-27 ~1 PM EDT) — altitudes below −500 ft are
@@ -75,7 +75,7 @@ test); repo 363 MB compressed with the 30-day window.
   farm; re-check the middle runway), **11-20 10:17 AM EST (October's FAA counts
   vs busy times, both rules; his "yes, schedule it", 11-04)**, **12-12 and
   2027-01-11 (the forecast's direction rules: `tools/flow_rules.py`, §4 Farm
-  forecast)**, 2027-01-15 (777-9 deliveries: drop `B779`).
+  forecast; from 11-20 both also read the plane and direction scores and suggest up to three measured improvements, his "yes" to "you will come back with results and suggest possible improvements")**, 2027-01-15 (777-9 deliveries: drop `B779`).
 
 ### What changed on 10-24 (a review he asked for, then his decisions; PRs #88–#93)
 Three parallel reviews (the Pi programs, the pages, the rules run over 6 real
