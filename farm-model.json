@@ -1,0 +1,147 @@
+{
+ "version": 1,
+ "near_mi": 2.0,
+ "below_ft": 6000,
+ "axis_deg": 181,
+ "share": {
+  "S": 0.755,
+  "N": 0.019
+ },
+ "p_south": [
+  {
+   "from_kt": null,
+   "to_kt": 0,
+   "p": 0.04,
+   "hours": 558
+  },
+  {
+   "from_kt": 0,
+   "to_kt": 2,
+   "p": 0.26,
+   "hours": 370
+  },
+  {
+   "from_kt": 2,
+   "to_kt": 4,
+   "p": 0.73,
+   "hours": 102
+  },
+  {
+   "from_kt": 4,
+   "to_kt": null,
+   "p": 0.94,
+   "hours": 176
+  }
+ ],
+ "above_per_hour": {
+  "S": 7.1,
+  "N": 7.5
+ },
+ "hours": {
+  "counted": 1370,
+  "south": 357,
+  "north": 850,
+  "mixed": 44,
+  "unclear": 119,
+  "with_wind": 1369
+ },
+ "ready": true,
+ "first": "2026-09-25",
+ "last": "2026-11-21",
+ "check": {
+  "note": "the rule on the same weeks with the winds that blew, not forecasts",
+  "hourly_corr": 0.79,
+  "block_corr": 0.86,
+  "blocks": 225,
+  "quiet_blocks": {
+   "n": 105,
+   "median": 1,
+   "max": 118
+  },
+  "busy_blocks": {
+   "n": 50,
+   "median": 102.0,
+   "min": 2
+  }
+ },
+ "source": "pi/farmcast.py on the farm's receiver: its recorded paths and KIAD METARs",
+ "keep": {
+  "hours": 12,
+  "to_south_kt": 4,
+  "fresh_s": 7200,
+  "quiet_h": 8,
+  "restart_hour": 5,
+  "look_h": 4
+ },
+ "now": {
+  "flow": "N",
+  "south": 0,
+  "north": 39,
+  "landings": 40,
+  "at": 1795293910
+ },
+ "score": {
+  "days": 28,
+  "forecasts": 29,
+  "by_lead": [
+   {
+    "lead": 0,
+    "blocks": 85,
+    "median_err": 7.6,
+    "median_actual": 4,
+    "median_forecast": 16.2
+   },
+   {
+    "lead": 1,
+    "blocks": 110,
+    "median_err": 7.0,
+    "median_actual": 3.0,
+    "median_forecast": 12.0
+   },
+   {
+    "lead": 2,
+    "blocks": 106,
+    "median_err": 6.7,
+    "median_actual": 3.0,
+    "median_forecast": 9.0
+   },
+   {
+    "lead": 3,
+    "blocks": 102,
+    "median_err": 6.9,
+    "median_actual": 3.0,
+    "median_forecast": 9.9
+   },
+   {
+    "lead": 4,
+    "blocks": 98,
+    "median_err": 7.1,
+    "median_actual": 3.5,
+    "median_forecast": 9.7
+   },
+   {
+    "lead": 5,
+    "blocks": 94,
+    "median_err": 7.0,
+    "median_actual": 3.0,
+    "median_forecast": 9.1
+   },
+   {
+    "lead": 6,
+    "blocks": 84,
+    "median_err": 6.8,
+    "median_actual": 2.0,
+    "median_forecast": 8.1
+   }
+  ],
+  "direction": [
+   {
+    "lead": 0,
+    "hours": 8,
+    "right": 0.875,
+    "said_south": 0.126,
+    "was_south": 0.0
+   }
+  ]
+ }
+}
