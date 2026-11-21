@@ -76,9 +76,9 @@
  "now": {
   "flow": "N",
   "south": 0,
-  "north": 39,
-  "landings": 40,
-  "at": 1795293910
+  "north": 42,
+  "landings": 43,
+  "at": 1795294809
  },
  "score": {
   "days": 28,
