@@ -1,0 +1,189 @@
+{
+ "version": 1,
+ "near_mi": 2.0,
+ "below_ft": 6000,
+ "axis_deg": 181,
+ "share": {
+  "S": 0.754,
+  "N": 0.02
+ },
+ "p_south": [
+  {
+   "from_kt": null,
+   "to_kt": 0,
+   "p": 0.03,
+   "hours": 645
+  },
+  {
+   "from_kt": 0,
+   "to_kt": 2,
+   "p": 0.24,
+   "hours": 392
+  },
+  {
+   "from_kt": 2,
+   "to_kt": 4,
+   "p": 0.73,
+   "hours": 102
+  },
+  {
+   "from_kt": 4,
+   "to_kt": null,
+   "p": 0.95,
+   "hours": 201
+  }
+ ],
+ "above_per_hour": {
+  "S": 7.0,
+  "N": 7.5
+ },
+ "hours": {
+  "counted": 1531,
+  "south": 382,
+  "north": 960,
+  "mixed": 47,
+  "unclear": 142,
+  "with_wind": 1529
+ },
+ "ready": true,
+ "first": "2026-09-25",
+ "last": "2026-11-28",
+ "check": {
+  "note": "the rule on the same weeks with the winds that blew, not forecasts",
+  "hourly_corr": 0.8,
+  "block_corr": 0.87,
+  "blocks": 251,
+  "quiet_blocks": {
+   "n": 123,
+   "median": 1,
+   "max": 118
+  },
+  "busy_blocks": {
+   "n": 53,
+   "median": 100,
+   "min": 2
+  }
+ },
+ "source": "pi/farmcast.py on the farm's receiver: its recorded paths and KIAD METARs",
+ "keep": {
+  "hours": 12,
+  "to_south_kt": 4,
+  "fresh_s": 7200,
+  "quiet_h": 8,
+  "restart_hour": 5,
+  "look_h": 4
+ },
+ "now": {
+  "flow": "S",
+  "south": 6,
+  "north": 0,
+  "landings": 6,
+  "at": 1795873504
+ },
+ "score": {
+  "days": 28,
+  "forecasts": 29,
+  "by_lead": [
+   {
+    "lead": 0,
+    "blocks": 84,
+    "median_err": 5.7,
+    "median_actual": 3.0,
+    "median_forecast": 8.5
+   },
+   {
+    "lead": 1,
+    "blocks": 109,
+    "median_err": 6.2,
+    "median_actual": 3,
+    "median_forecast": 8.9
+   },
+   {
+    "lead": 2,
+    "blocks": 105,
+    "median_err": 6.2,
+    "median_actual": 2,
+    "median_forecast": 8.8
+   },
+   {
+    "lead": 3,
+    "blocks": 101,
+    "median_err": 6.2,
+    "median_actual": 2,
+    "median_forecast": 8.5
+   },
+   {
+    "lead": 4,
+    "blocks": 97,
+    "median_err": 6.4,
+    "median_actual": 2,
+    "median_forecast": 7.6
+   },
+   {
+    "lead": 5,
+    "blocks": 93,
+    "median_err": 5.9,
+    "median_actual": 2,
+    "median_forecast": 6.8
+   },
+   {
+    "lead": 6,
+    "blocks": 88,
+    "median_err": 6.1,
+    "median_actual": 2.0,
+    "median_forecast": 6.9
+   }
+  ],
+  "direction": [
+   {
+    "lead": 0,
+    "hours": 125,
+    "right": 0.928,
+    "said_south": 0.232,
+    "was_south": 0.16
+   },
+   {
+    "lead": 1,
+    "hours": 125,
+    "right": 0.96,
+    "said_south": 0.248,
+    "was_south": 0.2
+   },
+   {
+    "lead": 2,
+    "hours": 103,
+    "right": 0.816,
+    "said_south": 0.213,
+    "was_south": 0.243
+   },
+   {
+    "lead": 3,
+    "hours": 82,
+    "right": 0.841,
+    "said_south": 0.235,
+    "was_south": 0.305
+   },
+   {
+    "lead": 4,
+    "hours": 63,
+    "right": 0.73,
+    "said_south": 0.373,
+    "was_south": 0.397
+   },
+   {
+    "lead": 5,
+    "hours": 43,
+    "right": 0.488,
+    "said_south": 0.127,
+    "was_south": 0.581
+   },
+   {
+    "lead": 6,
+    "hours": 24,
+    "right": 0.125,
+    "said_south": 0.155,
+    "was_south": 1.0
+   }
+  ]
+ }
+}
